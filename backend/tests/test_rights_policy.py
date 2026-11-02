@@ -54,6 +54,26 @@ def test_unstated_license_allows_limited_private_processing_without_redistributi
             "METADATA_ONLY",
         ),
         (
+            _private_report(site_terms_status="access_denied"),
+            "REVIEW_REQUIRED",
+            "METADATA_ONLY",
+        ),
+        (
+            _private_report(site_terms_status="lookup_failed"),
+            "REVIEW_REQUIRED",
+            "METADATA_ONLY",
+        ),
+        (
+            _private_report(site_terms_status="parsing_inconclusive"),
+            "REVIEW_REQUIRED",
+            "METADATA_ONLY",
+        ),
+        (
+            _private_report(site_terms_status="robots_disallowed"),
+            "REVIEW_REQUIRED",
+            "METADATA_ONLY",
+        ),
+        (
             _private_report(work_type="computer_program"),
             "REVIEW_REQUIRED",
             "METADATA_ONLY",

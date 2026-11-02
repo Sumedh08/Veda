@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from app.config import get_settings
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPOSITORY_ROOT / "backend" / "scripts"))
 
@@ -45,6 +47,20 @@ def test_default_browser_server_clears_all_provider_keys_and_stays_disabled():
         assert os.environ["OPENROUTER_API_KEY"] == ""
         assert os.environ["OPENALEX_API_KEY"] == ""
     finally:
+        os.environ.clear()
+        os.environ.update(previous)
+
+
+def test_isolated_browser_server_uses_explicit_private_research_settings():
+    previous = os.environ.copy()
+    try:
+        configure_isolated_environment("sqlite:///temporary-browser-test.sqlite")
+        get_settings.cache_clear()
+        effective_settings = get_settings()
+        assert effective_settings.rights_use_mode == "private_research"
+        assert effective_settings.rights_jurisdiction == "IN"
+    finally:
+        get_settings.cache_clear()
         os.environ.clear()
         os.environ.update(previous)
 

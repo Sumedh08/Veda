@@ -506,6 +506,123 @@ def test_verified_publication_page_fails_closed_when_robots_disallows_fetch():
 
 
 @pytest.mark.parametrize(
+    ("terms_response", "expected_status"),
+    [
+        (httpx.Response(403, headers={"content-type": "text/html"}), "access_denied"),
+        (httpx.Response(503, headers={"content-type": "text/html"}), "lookup_failed"),
+        (
+            httpx.Response(302, headers={"location": "https://outside.example/terms"}),
+            "lookup_failed",
+        ),
+        (httpx.ConnectTimeout("terms request timed out"), "lookup_failed"),
+        (
+            httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text="<html><head><script>not visible terms text</script></head><body></body></html>",
+            ),
+            "parsing_inconclusive",
+        ),
+        (
+            httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=(
+                    "<html><body>These terms describe ordinary website access and acceptable "
+                    "use without a detected automated processing restriction.</body></html>"
+                ),
+            ),
+            "checked_no_restriction_signal",
+        ),
+        (
+            httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=(
+                    "<html><head><title>Page not found</title></head><body>"
+                    "<nav>Home Research Publications Contact About Our institute</nav>"
+                    "<p>The page you requested could not be found.</p></body></html>"
+                ),
+            ),
+            "parsing_inconclusive",
+        ),
+    ],
+)
+def test_terms_lookup_failures_are_not_recorded_as_terms_not_found(terms_response, expected_status):
+    def handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nAllow: /")
+        if request.url.path == "/reports/food-security":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=(
+                    "<html><head><title>Food security policy evidence</title>"
+                    '<meta name="citation_title" content="Food security policy evidence">'
+                    '<link rel="canonical" href="https://fao.example/reports/food-security">'
+                    "</head><body>Original report page.</body></html>"
+                ),
+            )
+        if isinstance(terms_response, BaseException):
+            raise terms_response
+        return terms_response
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    provider = WordPressPublicationSearchProvider(
+        client=client, public_resolver=lambda *_args: ["8.8.8.8"]
+    )
+    try:
+        result = provider.verify_publication_page(
+            _organization_for_metadata_verification(),
+            "https://fao.example/reports/food-security",
+            expected_title="Food security policy evidence",
+        )
+    finally:
+        provider.close()
+        client.close()
+
+    assert result.site_terms_status == expected_status
+
+
+def test_terms_not_found_requires_completed_bounded_checks():
+    requested_terms_paths = []
+
+    def handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nAllow: /")
+        if request.url.path == "/reports/food-security":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=(
+                    "<html><head><title>Food security policy evidence</title>"
+                    '<meta name="citation_title" content="Food security policy evidence">'
+                    '<link rel="canonical" href="https://fao.example/reports/food-security">'
+                    "</head><body>Original report page.</body></html>"
+                ),
+            )
+        requested_terms_paths.append(request.url.path)
+        return httpx.Response(404, headers={"content-type": "text/html"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    provider = WordPressPublicationSearchProvider(
+        client=client, public_resolver=lambda *_args: ["8.8.8.8"]
+    )
+    try:
+        result = provider.verify_publication_page(
+            _organization_for_metadata_verification(),
+            "https://fao.example/reports/food-security",
+            expected_title="Food security policy evidence",
+        )
+    finally:
+        provider.close()
+        client.close()
+
+    assert requested_terms_paths == ["/terms-of-use", "/terms"]
+    assert result.site_terms_status == "not_found"
+
+
+@pytest.mark.parametrize(
     ("status_code", "expected_code"),
     [
         (401, "authentication_required"),

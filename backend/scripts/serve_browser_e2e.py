@@ -59,6 +59,11 @@ def configure_isolated_environment(database_url: str) -> None:
         {
             "APP_ENV": "test",
             "DATABASE_URL": database_url,
+            # Exercise the user's configured personal-research policy only in
+            # this disposable browser/API environment. Production and ordinary
+            # application configuration remain operator-controlled.
+            "RIGHTS_USE_MODE": "private_research",
+            "RIGHTS_JURISDICTION": "IN",
             "FRONTEND_ORIGINS": "http://127.0.0.1:5176",
             "DEV_AUTH_ENABLED": "true",
             "DEV_AUTH_SECRET": secrets.token_urlsafe(48),

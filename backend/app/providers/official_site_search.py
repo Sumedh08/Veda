@@ -61,6 +61,11 @@ _RESEARCH_SUBTYPES = frozenset(
     }
 )
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_TERMS_SOFT_ERROR_PATTERNS = (
+    re.compile(r"\b(?:404\s*(?:not found)?|page not found)\b"),
+    re.compile(r"\bthe page (?:you requested )?could not be found\b"),
+    re.compile(r"\b(?:access denied|this page is unavailable)\b"),
+)
 
 
 class OfficialSitePublicationSearchError(Exception):
@@ -228,12 +233,17 @@ class _TermsText(HTMLParser):
             self.parts.append(data[:500])
 
 
-def _site_terms_restriction_codes(content: bytes) -> tuple[str, ...]:
-    """Return deterministic signals only; this does not interpret legal terms."""
+def _site_terms_signals(content: bytes) -> tuple[str | None, tuple[str, ...]]:
+    """Extract bounded visible text and deterministic signals, without legal interpretation."""
     parser = _TermsText()
-    parser.feed(content[:64_000].decode("utf-8", errors="replace"))
-    parser.close()
+    try:
+        parser.feed(content[:64_000].decode("utf-8", errors="replace"))
+        parser.close()
+    except (UnicodeError, ValueError):
+        return None, ()
     text = " ".join(" ".join(parser.parts).casefold().split())
+    if len(text) < 40 or any(pattern.search(text) for pattern in _TERMS_SOFT_ERROR_PATTERNS):
+        return None, ()
     patterns = {
         "automated_access": re.compile(
             r"\b(?:automated|automatic)\s+(?:access|means|requests|systems|tools|scraping|crawling)\b"
@@ -252,7 +262,7 @@ def _site_terms_restriction_codes(content: bytes) -> tuple[str, ...]:
             r".{0,100}\b(?:copy|reproduce|reproduction|download|extract)\b"
         ),
     }
-    return tuple(code for code, pattern in patterns.items() if pattern.search(text))
+    return text, tuple(code for code, pattern in patterns.items() if pattern.search(text))
 
 
 def _publication_rights_signals(content: bytes) -> tuple[tuple[str, ...], bool]:
@@ -807,10 +817,14 @@ class WordPressPublicationSearchProvider:
                 if fallback and fallback not in candidate_terms_urls:
                     candidate_terms_urls.append(fallback)
             found_terms_page = False
+            terms_requests_attempted = 0
+            terms_not_found_count = 0
+            terms_robots_blocked = False
             for candidate_terms_url in candidate_terms_urls[:2]:
                 if robots is not None and not robots.can_fetch("VedaResearch", candidate_terms_url):
-                    site_terms_status = "robots_disallowed"
+                    terms_robots_blocked = True
                     continue
+                site_terms_url = candidate_terms_url
                 try:
                     terms_body, attempted, terms_http_status = self._get(
                         candidate_terms_url,
@@ -820,32 +834,50 @@ class WordPressPublicationSearchProvider:
                         verified_domains=domains,
                         allow_http_4xx=True,
                     )
-                except OfficialSitePublicationSearchError:
-                    site_terms_status = "unavailable"
-                    terms_requests += 1
+                except OfficialSitePublicationSearchError as exc:
+                    terms_requests += exc.requests_attempted
+                    site_terms_status = (
+                        "access_denied"
+                        if exc.code in {"access_denied", "authentication_required"}
+                        else "parsing_inconclusive"
+                        if exc.code == "unexpected_content_type"
+                        else "lookup_failed"
+                    )
                     break
                 terms_requests += attempted
+                terms_requests_attempted += 1
                 if terms_http_status == 404:
-                    site_terms_status = "not_found"
+                    terms_not_found_count += 1
                     continue
-                if terms_http_status >= 400:
-                    site_terms_status = "unavailable"
+                if terms_http_status in {401, 403}:
+                    site_terms_status = "access_denied"
                     break
-                site_terms_url = candidate_terms_url
+                if terms_http_status >= 400:
+                    site_terms_status = "lookup_failed"
+                    break
                 site_terms_sha256 = hashlib.sha256(terms_body).hexdigest()
-                site_terms_restriction_codes = _site_terms_restriction_codes(terms_body)
-                site_terms_status = (
-                    "restriction_signal"
-                    if site_terms_restriction_codes
-                    else "checked_no_restriction_signal"
-                )
+                visible_text, site_terms_restriction_codes = _site_terms_signals(terms_body)
+                if visible_text is None:
+                    site_terms_status = "parsing_inconclusive"
+                    break
+                if site_terms_restriction_codes:
+                    site_terms_status = "restriction_signal"
+                elif terms_robots_blocked:
+                    site_terms_status = "robots_disallowed"
+                else:
+                    site_terms_status = "checked_no_restriction_signal"
                 found_terms_page = True
                 break
-            if not found_terms_page and site_terms_status not in {
-                "unavailable",
-                "robots_disallowed",
-            }:
-                site_terms_status = "not_found"
+            if not found_terms_page and site_terms_status == "not_checked":
+                if terms_robots_blocked:
+                    site_terms_status = "robots_disallowed"
+                elif (
+                    terms_requests_attempted > 0
+                    and terms_not_found_count == terms_requests_attempted
+                ):
+                    site_terms_status = "not_found"
+                elif terms_requests_attempted > 0:
+                    site_terms_status = "lookup_failed"
 
         return OfficialPublicationPageMetadata(
             requested_url=safe_url,

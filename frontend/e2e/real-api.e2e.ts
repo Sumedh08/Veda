@@ -257,6 +257,73 @@ test('browser inspects question-only official institutional report passages from
     .toEqual(['/api/v1/auth/dev-session']);
 });
 
+test('browser inspects the saved T-140 unseeded publisher record and metadata-only limit', async ({ page }) => {
+  test.skip(
+    !process.env.VEDA_REAL_E2E_REUSE_DATABASE_PATH || !process.env.VEDA_REAL_E2E_T140_REPORT_ID,
+    'Set a copied evaluation database path and saved T-140 report ID for offline browser inspection.',
+  );
+  const expectedApiOrigin = new URL(
+    process.env.VEDA_E2E_API_BASE_URL ||
+      `http://127.0.0.1:${process.env.VEDA_REAL_E2E_API_PORT || '8001'}/api/v1`,
+  ).origin;
+  const reportId = process.env.VEDA_REAL_E2E_T140_REPORT_ID!;
+  const apiResponses: { url: string; status: number; method: string }[] = [];
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+    if (url.pathname.startsWith('/api/v1/')) {
+      apiResponses.push({ url: response.url(), status: response.status(), method: response.request().method() });
+    }
+  });
+
+  await page.goto('/');
+  const localSessionPromise = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === '/api/v1/auth/dev-session',
+  );
+  await page.getByRole('button', { name: 'Continue to local workspace' }).click();
+  expect((await localSessionPromise).status()).toBe(200);
+  const savedRecord = await page.evaluate(async ({ expectedReportId }) => {
+    const { api } = await import('/src/api.ts');
+    const body = await api<{
+      job: { question: string };
+      report: { citation_map: Record<string, { source_id: string; title: string; doi: string | null }> };
+      sources: Array<{ id: string; title: string; doi: string | null }>;
+    }>(`/reports/${expectedReportId}/inspection`);
+    const source = body.sources.find((item) => item.doi === '10.46830/wrirpt.22.00055');
+    if (!source) return null;
+    const citation = Object.entries(body.report.citation_map)
+      .find(([, item]) => item.source_id === source.id);
+    return citation ? { question: body.job.question, sourceTitle: source.title, citationLabel: citation[0] } : null;
+  }, { expectedReportId: reportId });
+  expect(savedRecord, 'the persisted WRI India publication must be cited by the saved report').toBeTruthy();
+
+  await page.getByRole('button', { name: 'Reports' }).click();
+  const reportRow = page.locator('.report-history-row').filter({ hasText: savedRecord!.question });
+  await expect(reportRow).toBeVisible();
+  await reportRow.getByRole('button', { name: 'Open report' }).click();
+  await expect(page.locator('.historical-report-heading')).toContainText(savedRecord!.question);
+  await expect(page.locator('.report-content')).toContainText('Climate Resilient Cities');
+
+  await page.getByRole('button', { name: `Open source ${savedRecord!.citationLabel}` }).click();
+  const inspector = page.getByRole('dialog', { name: savedRecord!.sourceTitle });
+  await expect(inspector).toBeVisible();
+  await expect(inspector.locator('.access-badge')).toContainText('METADATA-ONLY');
+  await expect(inspector).toContainText('World Resources Institute');
+  await expect(inspector).toContainText('Organization discovery provenance');
+  await expect(inspector).toContainText('VERIFIED DOMAIN SPECIALIST');
+  await expect(inspector).toContainText('Publisher-linked domain · official site not independently verified');
+  await expect(inspector).toContainText('wri-india.org');
+  await expect(inspector).not.toContainText('Verified official domain');
+  await expect(inspector).toContainText('crossref doi title publisher and link domain match');
+  await expect(inspector).toContainText('metadata only not assessed');
+  await expect(inspector).toContainText('Publication quality');
+  await expect(inspector).not.toContainText('Passages in evidence ledger');
+
+  expect(apiResponses.some((item) => new URL(item.url).pathname === `/api/v1/reports/${reportId}/inspection`)).toBe(true);
+  expect(apiResponses.every((item) => new URL(item.url).origin === expectedApiOrigin && item.status < 400)).toBe(true);
+  expect(apiResponses.filter((item) => item.method !== 'GET').map((item) => new URL(item.url).pathname))
+    .toEqual(['/api/v1/auth/dev-session']);
+});
+
 test('real browser project name and user-authored brief persist through create, edit, and reload', async ({ page }) => {
   const expectedApiOrigin = new URL(
     process.env.VEDA_E2E_API_BASE_URL ||
@@ -733,6 +800,7 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
             title: string;
             doi: string | null;
             official_url: string;
+            publisher_domain_search_lead_url?: string;
             publisher_verification: string;
             content_fetched: boolean;
             rights_status: string;
@@ -1235,37 +1303,46 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
     const generalWeb = searchCoverage.general_web_discovery;
     const selectedOfficialOrganizationId = generalWeb?.official_site_target_selection?.organization_id;
     const newlyDiscoveredOrganization = generalWeb?.newly_discovered_organizations.find((item) =>
-      item.identity_status === 'VERIFIED_ESTABLISHED'
+      ['VERIFIED_ESTABLISHED', 'VERIFIED_DOMAIN_SPECIALIST'].includes(item.identity_status)
       && item.registry_match === false
       && item.organization_id === selectedOfficialOrganizationId,
     );
     expect(newlyDiscoveredOrganization, 'the live web search must find an unseeded organization').toBeTruthy();
-    expect(newlyDiscoveredOrganization?.verification_source).toContain('api.ror.org');
+    expect(
+      newlyDiscoveredOrganization?.verification_source,
+      'organization provenance must include an authoritative registry or DOI publisher record',
+    ).toMatch(/api\.ror\.org|api\.crossref\.org\/works/i);
     expect(newlyDiscoveredOrganization?.official_domain).toMatch(/^[a-z0-9.-]+\.[a-z]{2,}$/i);
     const discoveredOrganization = searchCoverage.organization_discovery.organizations.find(
       (organization) => organization.organization_id === newlyDiscoveredOrganization?.organization_id,
     );
-    expect(discoveredOrganization?.identity_status).toBe('VERIFIED_ESTABLISHED');
+    expect([
+      'VERIFIED_ESTABLISHED',
+      'VERIFIED_DOMAIN_SPECIALIST',
+    ]).toContain(discoveredOrganization?.identity_status);
     expect(discoveredOrganization?.registry_match).toBe(false);
     const officialSiteSearch = searchCoverage.organization_discovery.publication_searches.find((search) =>
       search.organization_id === newlyDiscoveredOrganization?.organization_id
       && search.provider?.startsWith('Official website search plus Crossref') === true
-      && search.status === 'completed'
-      && search.returned_count > 0,
+      && search.request_count > 0,
     );
-    expect(officialSiteSearch, 'a verified organization must yield a Crossref-verified official-site publication').toBeTruthy();
+    expect(officialSiteSearch, 'the verified-domain publication route must record its bounded attempt').toBeTruthy();
+    expect(['completed', 'no_verified_official_publications']).toContain(officialSiteSearch?.status);
     expect(officialSiteSearch?.query).toContain(`site:${newlyDiscoveredOrganization?.official_domain}`);
-    expect(officialSiteSearch?.request_count).toBeGreaterThan(0);
     const verifiedPublication = generalWeb?.verified_official_publications.find((publication) =>
       publication.organization_id === newlyDiscoveredOrganization?.organization_id
       && publication.publisher_verification === 'verified'
+      && typeof publication.publisher_domain_search_lead_url === 'string'
+      && new URL(publication.publisher_domain_search_lead_url).hostname.toLowerCase().endsWith(
+        newlyDiscoveredOrganization!.official_domain.toLowerCase(),
+      )
       && (requireWebPublisherFullText
         ? publication.content_fetched && (publication.passage_count || 0) > 0
         : !publication.content_fetched
           && publication.rights_status === 'metadata_only_not_assessed'),
     );
     expect(verifiedPublication, 'the official publication must pass publisher identity and acquisition checks').toBeTruthy();
-    const verifiedPublicationHost = new URL(verifiedPublication!.official_url).hostname.toLowerCase();
+    const verifiedPublicationHost = new URL(verifiedPublication!.publisher_domain_search_lead_url!).hostname.toLowerCase();
     const verifiedOrganizationDomain = newlyDiscoveredOrganization!.official_domain.toLowerCase();
     expect(
       verifiedPublicationHost === verifiedOrganizationDomain
@@ -1311,7 +1388,8 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
     const siteInspector = page.locator('.evidence-drawer');
     await expect(siteInspector).toContainText('Organization discovery provenance');
     await expect(siteInspector).toContainText(newlyDiscoveredOrganization!.canonical_name);
-    await expect(siteInspector).toContainText('verified organization domain and crossref publisher identity');
+    await expect(siteInspector).toContainText(/crossref.*publisher.*(identity|match)/i);
+    await expect(siteInspector).toContainText(newlyDiscoveredOrganization!.official_domain);
     await expect(siteInspector).toContainText('Publication content');
     if (requireWebPublisherFullText) {
       await expect(siteInspector).toContainText('full text html');
@@ -1335,7 +1413,7 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
       await expect(siteInspector).toContainText('not retrieved');
       await expect(siteInspector).toContainText('metadata only not assessed');
     }
-    await expect(siteInspector.getByRole('link', { name: 'Open verified-domain page' }))
+    await expect(siteInspector.getByRole('link', { name: 'Open publication link' }))
       .toHaveAttribute('href', verifiedPublication!.official_url);
     await siteInspector.getByRole('button', { name: 'Close source inspector' }).click();
   }

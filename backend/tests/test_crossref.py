@@ -39,6 +39,34 @@ def test_crossref_normalizes_metadata_and_bounds_abstract():
     assert record.provider_metadata["journal_issns"] == ["1234-5679", "8765-4326"]
 
 
+def test_crossref_preserves_report_document_type_instead_of_calling_it_a_journal_article():
+    payload = {
+        "message": {
+            "items": [
+                {
+                    "DOI": "10.5555/institutional-report",
+                    "title": ["Climate vulnerability assessment"],
+                    "publisher": "Specialist Research Institute",
+                    "type": "report",
+                }
+            ]
+        }
+    }
+
+    provider = CrossrefProvider(
+        httpx.Client(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=payload))
+        )
+    )
+    try:
+        record = provider.search("climate vulnerability", limit=1)[0]
+    finally:
+        provider.close()
+
+    assert record.source_type == "institutional_report"
+    assert record.provider_metadata["work_type"] == "report"
+
+
 def test_plain_text_strips_markup_and_decodes_entities():
     assert plain_text("<jats:p>Workers &amp; managers</jats:p>") == "Workers & managers"
 

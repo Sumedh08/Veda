@@ -205,6 +205,29 @@ def test_official_site_search_follows_bounded_https_redirect_within_verified_dom
     ]
 
 
+def test_official_site_search_stops_same_url_redirect_loop_immediately():
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        target = "/403" if request.url.path == "/" else "/403"
+        return httpx.Response(301, headers={"location": target})
+
+    provider = WordPressPublicationSearchProvider(
+        client=httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False),
+        public_resolver=lambda *_args: ["8.8.8.8"],
+    )
+
+    with pytest.raises(OfficialSitePublicationSearchError) as raised:
+        provider.search(
+            _organization(), question="offshore wind cable", query="offshore wind cable", limit=5
+        )
+
+    assert raised.value.code == "redirect_loop"
+    assert raised.value.requests_attempted == 2
+    assert calls == ["/", "/403"]
+
+
 def test_official_site_search_rejects_unverified_organization_domains():
     provider = WordPressPublicationSearchProvider(
         client=httpx.Client(transport=httpx.MockTransport(lambda _request: pytest.fail("no call"))),

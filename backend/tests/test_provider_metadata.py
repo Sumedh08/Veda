@@ -278,6 +278,42 @@ def test_verified_web_publication_provenance_exposes_bounded_rights_and_origin_f
     )
 
 
+def test_crossref_linked_domain_is_not_serialized_as_a_verified_official_domain():
+    source = SimpleNamespace(
+        id="source-crossref-domain-lead",
+        title="Climate Resilient Cities",
+        doi="10.46830/wrirpt.22.00055",
+        url="https://doi.org/10.46830/wrirpt.22.00055",
+        authors_json=[],
+        published_year=2024,
+        publisher="World Resources Institute",
+        metadata_json={
+            "provider": "Crossref",
+            "provider_metadata": {
+                "organization_discovery": {
+                    "organization_id": "https://ror.org/047ktk903",
+                    "organization_name": "World Resources Institute",
+                    "identity_status": "VERIFIED_DOMAIN_SPECIALIST",
+                    "verification_method": "ror_exact_publisher_name_plus_crossref_linked_domain",
+                    "verification_source": "https://api.crossref.org/works/10.46830/wrirpt.22.00055",
+                    "official_domain": "wri-india.org",
+                    "official_publication_url": "https://doi.org/10.46830/wrirpt.22.00055",
+                    "quality_assessment": "not_assessed",
+                }
+            },
+        },
+        source_type="institutional_report",
+        retrieval_status="metadata_only",
+        abstract_excerpt=None,
+        appraisal_json={},
+    )
+
+    provenance = _source_out(source)["organization_provenance"]
+
+    assert "official_domain" not in provenance
+    assert provenance["publisher_linked_domain"] == "wri-india.org"
+
+
 def test_crossref_verified_official_site_metadata_survives_source_serialization():
     source = SimpleNamespace(
         id="source-crossref-publisher-catalog",

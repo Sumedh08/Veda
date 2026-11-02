@@ -282,7 +282,8 @@ export type Source = {
     openalex_institution_id: string | null;
     quality_assessment: 'not_assessed';
     publisher_verification?: string;
-    official_domain?: string;
+    official_domain?: string | null;
+    publisher_linked_domain?: string;
     official_publication_url?: string;
     publication_discovery_provider?: string;
     publication_content_access?: 'not_retrieved' | 'full_text_html' | 'full_text_pdf' | 'full_text_jats';
@@ -849,14 +850,18 @@ export type ResearchReport = {
         }>;
         domain_verifications?: Array<{
           domain?: string;
+          candidate_domain?: string;
+          publisher_search_lead_url?: string | null;
           status?: string;
           canonical_name?: string;
           verification_source?: string;
+          organization_id?: string;
         }>;
         newly_discovered_organizations?: Array<{
           organization_id?: string;
           canonical_name?: string;
-          official_domain?: string;
+          official_domain?: string | null;
+          publisher_linked_domain?: string;
           identity_status?: string;
           registry_match?: boolean;
           verification_source?: string;
@@ -871,6 +876,21 @@ export type ResearchReport = {
           rights_status?: string;
           content_fetched?: boolean;
         };
+        verified_official_publications?: Array<{
+          doi?: string | null;
+          title?: string;
+          publisher?: string;
+          official_url?: string;
+          publisher_domain_search_lead_url?: string;
+          publisher_verification?: string;
+          content_fetched?: boolean;
+          rights_status?: string;
+          selected?: boolean;
+          organization_id?: string;
+          source_id?: string;
+          retrieval_status?: string;
+          passage_count?: number;
+        }>;
         reserved_credits?: number;
         reported_cost_credits?: number;
         unresolved_reserved_credits?: number;

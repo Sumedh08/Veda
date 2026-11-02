@@ -122,6 +122,11 @@ class CrossrefProvider:
                 "abstract_excerpt_truncated": len(abstract) > MAX_ABSTRACT_EXCERPT,
                 "crossref_full_text": CrossrefProvider._full_text_metadata(item),
             },
+            source_type=(
+                "institutional_report"
+                if isinstance(item.get("type"), str) and item["type"].casefold() == "report"
+                else "scholarly_article"
+            ),
         )
 
     @staticmethod

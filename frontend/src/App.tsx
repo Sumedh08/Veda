@@ -1319,13 +1319,17 @@ function SourceGovernancePanel({ governance }: { governance: Source['source_gove
 
 function OrganizationDiscoveryPanel({ organization }: { organization: Source['organization_provenance'] }) {
   if (!organization) return null;
+  const crossrefLinkedDomainOnly = /crossref.*linked.*domain/i.test(organization.verification_method);
+  const publisherLinkedDomain = organization.publisher_linked_domain ||
+    (crossrefLinkedDomainOnly ? organization.official_domain : undefined);
   return <><div className="drawer-divider" /><h3>Organization discovery provenance</h3><div className="detail-list">
     <div><span>Organization</span><b>{organization.organization_name}</b></div>
     <div><span>Identity status</span><b>{organization.identity_status.replace(/_/g, ' ')}</b></div>
     <div><span>Identity method</span><b>{organization.verification_method.replace(/_/g, ' ')}</b></div>
-    {organization.official_domain && <div><span>Verified official domain</span><b>{organization.official_domain}</b></div>}
+    {!crossrefLinkedDomainOnly && organization.official_domain && <div><span>Verified official domain</span><b>{organization.official_domain}</b></div>}
+    {publisherLinkedDomain && <div><span>Publisher-linked domain · official site not independently verified</span><b>{publisherLinkedDomain}</b></div>}
     {organization.publisher_verification && <div><span>Publication publisher check</span><b>{organization.publisher_verification.replace(/_/g, ' ')}</b></div>}
-    {organization.official_publication_url && <div><span>Official publication page</span><a href={organization.official_publication_url} target="_blank" rel="noreferrer">Open verified-domain page<ExternalLink size={12} /></a></div>}
+    {organization.official_publication_url && <div><span>Publication link</span><a href={organization.official_publication_url} target="_blank" rel="noreferrer">Open publication link<ExternalLink size={12} /></a></div>}
     {organization.publication_discovery_provider && <div><span>Publication discovery and verification</span><b>{organization.publication_discovery_provider}</b></div>}
     {organization.publication_content_access && <div><span>Publication content</span><b>{organization.publication_content_access.replace(/_/g, ' ')}</b></div>}
     {organization.publication_rights_status && <div><span>Publication rights</span><b>{organization.publication_rights_status.replace(/_/g, ' ')}</b></div>}

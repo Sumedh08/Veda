@@ -267,6 +267,15 @@ def _safe_https_url(value: object) -> str | None:
     return value.strip()
 
 
+def _redirect_key(value: str) -> str:
+    parsed = urlsplit(value)
+    host = (parsed.hostname or "").encode("idna").decode("ascii").casefold().rstrip(".")
+    port = parsed.port
+    authority = host if port in {None, 443} else f"{host}:{port}"
+    path = parsed.path or "/"
+    return f"https://{authority}{path}?{parsed.query}"
+
+
 def _host_is_in_verified_domain(host: str, domains: list[str]) -> bool:
     normalized = host.casefold().rstrip(".")
     try:
@@ -399,6 +408,7 @@ class WordPressPublicationSearchProvider:
         current_params = params
         requests_attempted = 0
         redirects_followed = 0
+        visited_urls = {_redirect_key(safe)}
         while True:
             parsed = urlsplit(current_url)
             host = (parsed.hostname or "").casefold()
@@ -457,6 +467,14 @@ class WordPressPublicationSearchProvider:
                             raise OfficialSitePublicationSearchError(
                                 "redirect_rejected", request_dispatched=True
                             )
+                        redirect_key = _redirect_key(redirect_url)
+                        if redirect_key in visited_urls:
+                            raise OfficialSitePublicationSearchError(
+                                "redirect_loop",
+                                request_dispatched=True,
+                                requests_attempted=requests_attempted,
+                            )
+                        visited_urls.add(redirect_key)
                         current_url = redirect_url
                         current_params = None
                         redirects_followed += 1

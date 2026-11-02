@@ -3712,11 +3712,12 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
 
         def search(self, query, *, limit=5):
             type(self).queries.append(query)
-            if (
-                query == "Offshore wind transmission system dynamics in India"
-                and verification_path
-                in {"crossref_publisher_link", "crossref_and_official_page_metadata"}
-            ):
+            if query.startswith(
+                "Offshore wind transmission system dynamics in India"
+            ) and verification_path in {
+                "crossref_publisher_link",
+                "crossref_and_official_page_metadata",
+            }:
                 return [
                     ScholarlyWork(
                         external_id="doi:10.5555/offshore-wind-dynamics",
@@ -3737,7 +3738,7 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
                     )
                 ][:limit]
             if (
-                query == "Offshore wind transmission planning in India engineering report"
+                query.startswith("Offshore wind transmission planning in India engineering report")
                 and verification_path != "official_page_metadata"
             ):
                 return [
@@ -3837,14 +3838,16 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         and "transmission" in item["matched_topic_terms"]
         for item in routing
     )
-    assert event["data"]["general_web_discovery"]["request_count"] == 2, json.dumps(
-        event["data"]["general_web_discovery"], indent=2
+    expected_search_count = 1 if verification_path == "crossref_publisher_link" else 2
+    assert event["data"]["general_web_discovery"]["request_count"] == expected_search_count, (
+        json.dumps(event["data"]["general_web_discovery"], indent=2)
     )
-    assert len(FakeCrawl4AI.queries) == 2
-    assert FakeCrawl4AI.queries[1].startswith("site:windlab.example ")
-    assert event["data"]["general_web_discovery"]["searches"][1]["purpose"] == (
-        "verified_official_domain_publication_discovery"
-    )
+    assert len(FakeCrawl4AI.queries) == expected_search_count
+    if verification_path != "crossref_publisher_link":
+        assert FakeCrawl4AI.queries[1].startswith("site:windlab.example ")
+        assert event["data"]["general_web_discovery"]["searches"][1]["purpose"] == (
+            "verified_official_domain_publication_discovery"
+        )
     verified_publications = event["data"]["general_web_discovery"]["verified_official_publications"]
     if verification_path == "official_page_metadata":
         assert len(verified_publications) == 1
@@ -3874,10 +3877,15 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         assert page_attempt["search_title"] == (
             "Offshore wind transmission policy response evidence report"
         )
+    elif verification_path == "crossref_publisher_link":
+        assert any(
+            item["doi"] == "10.5555/offshore-wind-dynamics" for item in verified_publications
+        )
+        assert verified_publications[0]["lookup_method"] == "crossref_publisher_link_domain_match"
     else:
         assert any(
             item["doi"] == "10.5555/offshore-wind-transmission" for item in verified_publications
-        )
+        ), verified_publications
         assert verified_publications[0]["lookup_method"] == (
             "crossref_title_search"
             if verification_path == "ror"
@@ -3888,7 +3896,13 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         if verification_path in {"crossref_publisher_link", "crossref_and_official_page_metadata"}
         else "Offshore wind transmission planning in India engineering report"
     )
-    assert expected_crossref_query in EmptyCrossref.queries
+    assert any(query.startswith(expected_crossref_query) for query in EmptyCrossref.queries)
+    if verification_path == "crossref_publisher_link":
+        assert any(
+            query.startswith(expected_crossref_query)
+            and "Untrusted search snippet; not stored as evidence." in query
+            for query in EmptyCrossref.queries
+        ), EmptyCrossref.queries
     dynamic_org = next(
         item
         for item in event["data"]["organization_discovery"]["organizations"]
@@ -3901,6 +3915,15 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         else "VERIFIED_DOMAIN_SPECIALIST"
     )
     assert dynamic_org["registry_match"] is False
+    if verification_path == "crossref_publisher_link":
+        assert dynamic_org["official_domains"] == []
+        assert dynamic_org["publisher_linked_domains"] == ["windlab.example"]
+        assert (
+            event["data"]["general_web_discovery"]["domain_verifications"][-1][
+                "official_domain_verified"
+            ]
+            is False
+        )
     assert FixtureOfficialSite.search_calls == 0
     assert any(
         item["provider"] == "Official site publication search"
@@ -3969,6 +3992,15 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         assert reconciled["retrieval_status"] == "metadata_only"
         assert reconciled["passage_count"] == 0
         assert reconciled["rights_status"] == "not_assessed_metadata_only"
+    elif verification_path == "crossref_publisher_link":
+        verified_source = next(
+            source for source in sources if source["doi"] == "10.5555/offshore-wind-dynamics"
+        )
+        assert verified_source["url"] == "https://doi.org/10.5555/offshore-wind-dynamics"
+        assert "official_domain" not in verified_source["organization_provenance"]
+        assert verified_source["organization_provenance"]["publisher_linked_domain"] == (
+            "windlab.example"
+        )
     else:
         verified_source = next(
             source for source in sources if source["doi"] == "10.5555/offshore-wind-transmission"
@@ -4050,6 +4082,117 @@ def test_crossref_can_independently_link_an_unregistered_publisher_to_its_domain
         },
     )
     assert not _crossref_record_matches_publisher_domain(unrelated_host_record, "researchgate.net")
+
+
+def test_crossref_publication_can_verify_its_linked_domain_from_a_second_web_lead():
+    record = ScholarlyWork(
+        external_id="doi:10.46830/wrirpt.22.00055",
+        title=(
+            "Climate Resilient Cities Assessing Differential Vulnerability to Climate Hazards "
+            "in Urban India"
+        ),
+        doi="10.46830/wrirpt.22.00055",
+        url="https://doi.org/10.46830/wrirpt.22.00055",
+        authors=[],
+        published_year=2024,
+        publisher="World Resources Institute",
+        abstract_excerpt=None,
+        query="climate resilient cities",
+        provider="Crossref",
+        provider_metadata={
+            "crossref_full_text": {
+                "links": [
+                    {
+                        "url": (
+                            "https://wri-india.org/sites/default/files/Climate%20Resilient%20"
+                            "Cities_Final.pdf"
+                        ),
+                        "content_version": "vor",
+                        "intended_application": "similarity-checking",
+                    }
+                ]
+            }
+        },
+    )
+    initial_hit = {
+        "title": "Assessing Differential Vulnerability to Climate Hazards in ...",
+        "url": "https://www.wri.org/research",
+        "domain": "wri.org",
+        "snippet": (
+            "The report introduces the Climate Hazard and Vulnerability Assessment framework "
+            "for urban India."
+        ),
+    }
+    linked_domain_hit = {
+        "title": "Climate resilient cities",
+        "url": "https://wri-india.org/sites/default/files",
+        "domain": "wri-india.org",
+        "snippet": (
+            "Climate Resilient Cities: Assessing Differential Vulnerability to Climate Hazards "
+            "in Urban India. Report. New Delhi: WRI India."
+        ),
+    }
+
+    assert workflow._crossref_record_matches_publisher_domain(record, "wri-india.org")
+    assert not workflow._crossref_record_matches_publisher_domain(record, "wri-analytics.org")
+
+    match = workflow._crossref_linked_domain_search_hit(
+        record,
+        initial_hit,
+        [initial_hit, linked_domain_hit],
+        eligible_domains={"wri.org", "wri-india.org"},
+    )
+
+    assert match == ("wri-india.org", linked_domain_hit)
+    assert (
+        workflow._crossref_linked_domain_search_hit(
+            record,
+            initial_hit,
+            [initial_hit, linked_domain_hit],
+            eligible_domains={"wri.org"},
+        )
+        is None
+    )
+
+
+def test_crossref_verified_web_publication_dedup_requires_same_doi_publisher_and_linked_lead():
+    from app.research.workflow import _existing_crossref_web_publication
+
+    existing = {
+        "doi": "10.46830/wrirpt.22.00055",
+        "publisher": "World Resources Institute",
+        "publisher_domain_search_lead_url": "https://wri-india.org/sites/default/files",
+        "organization_id": "https://ror.org/047ktk903",
+    }
+    records = [existing]
+
+    assert (
+        _existing_crossref_web_publication(
+            records,
+            doi="10.46830/wrirpt.22.00055",
+            publisher="World Resources Institute",
+            publisher_search_lead_url="https://wri-india.org/sites/default/files",
+        )
+        is existing
+    )
+    assert (
+        _existing_crossref_web_publication(
+            records,
+            doi="10.46830/wrirpt.22.00055",
+            publisher="World Resources Institute",
+            publisher_search_lead_url="https://wri.org/research",
+        )
+        is None
+    )
+    assert (
+        _existing_crossref_web_publication(
+            records,
+            doi="10.46830/other-report",
+            publisher="World Resources Institute",
+            publisher_search_lead_url="https://wri-india.org/sites/default/files",
+        )
+        is None
+    )
 
 
 def test_recent_same_job_openaire_search_is_respected_by_repository_lookup_budget():

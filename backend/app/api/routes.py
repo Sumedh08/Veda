@@ -410,6 +410,11 @@ def _source_out(source: Source) -> dict[str, Any]:
                 ),
                 "quality_assessment": "not_assessed",
             }
+            verification_method = organization_provenance["verification_method"]
+            crossref_linked_domain_only = "crossref" in verification_method.casefold() and (
+                "linked" in verification_method.casefold()
+                and "domain" in verification_method.casefold()
+            )
             publisher_verification = raw_organization.get("publisher_verification")
             if publisher_verification in {
                 "official_domain_linked_from_ror_verified_site",
@@ -436,8 +441,21 @@ def _source_out(source: Source) -> dict[str, Any]:
             }:
                 organization_provenance["publication_rights_status"] = publication_rights_status
             official_domain = raw_organization.get("official_domain")
-            if isinstance(official_domain, str) and re.fullmatch(
-                r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", official_domain.casefold()
+            publisher_linked_domain = raw_organization.get("publisher_linked_domain")
+            if crossref_linked_domain_only and not isinstance(publisher_linked_domain, str):
+                # Historical records stored a Crossref-linked host in the field
+                # reserved for independently verified official domains.
+                publisher_linked_domain = official_domain
+            if isinstance(publisher_linked_domain, str) and re.fullmatch(
+                r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", publisher_linked_domain.casefold()
+            ):
+                organization_provenance["publisher_linked_domain"] = (
+                    publisher_linked_domain.casefold().rstrip(".")
+                )
+            if (
+                not crossref_linked_domain_only
+                and isinstance(official_domain, str)
+                and re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", official_domain.casefold())
             ):
                 organization_provenance["official_domain"] = official_domain.casefold().rstrip(".")
             publication_url = raw_organization.get("official_publication_url")

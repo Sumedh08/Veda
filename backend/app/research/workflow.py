@@ -2186,7 +2186,11 @@ def _crossref_record_matches_publisher_domain(work: ScholarlyWork, domain: str) 
         return False
     publisher_set = set(publisher_tokens)
     publisher_compact = "".join(publisher_tokens)
-    publisher_acronym = "".join(token[0] for token in publisher_tokens)
+    publisher_acronym = "".join(
+        token[0]
+        for token in re.findall(r"[a-z0-9]+", work.publisher.casefold())
+        if token not in {"and", "of", "the"}
+    )
     domain_compact = "".join(domain_tokens)
     domain_aliases = set(domain_tokens)
     for token in domain_tokens:
@@ -2196,6 +2200,9 @@ def _crossref_record_matches_publisher_domain(work: ScholarlyWork, domain: str) 
         bool(domain_aliases & publisher_set)
         or (len(domain_compact) >= 5 and domain_compact in publisher_compact)
         or (len(domain_compact) >= 3 and domain_compact == publisher_acronym)
+        # Institutional publishers often use their acronym as a host label and
+        # add a country or regional suffix (for example, "abc-india.org").
+        or (len(publisher_acronym) >= 3 and publisher_acronym in domain_tokens)
     )
     if not identity_matches:
         return False
@@ -2225,6 +2232,147 @@ def _crossref_record_matches_publisher_domain(work: ScholarlyWork, domain: str) 
         ):
             return True
     return False
+
+
+def _web_search_hit_identity_text(hit: dict[str, Any]) -> str:
+    """Combine a result title and snippet for bounded metadata lookup only.
+
+    Search snippets remain unverified leads: this text may help Crossref locate a
+    record, but it is never retained as a finding or accepted as title evidence
+    without an independent Crossref title and publisher-link match.
+    """
+    parts = []
+    for key, limit in (("title", 300), ("snippet", 500)):
+        value = hit.get(key)
+        if isinstance(value, str):
+            cleaned = " ".join(html.unescape(re.sub(r"<[^>]*>", " ", value)).split())
+            if cleaned:
+                parts.append(cleaned[:limit])
+    return " ".join(parts)[:800]
+
+
+def _normalized_web_hit_domain(hit: dict[str, Any]) -> str | None:
+    """Return a result's reported domain only when its HTTPS URL matches it."""
+    domain = hit.get("domain")
+    raw_url = hit.get("url")
+    if not isinstance(domain, str) or not isinstance(raw_url, str):
+        return None
+    try:
+        parsed = urlsplit(raw_url)
+        port = parsed.port
+        host = (parsed.hostname or "").encode("idna").decode("ascii").casefold().rstrip(".")
+        normalized = domain.encode("idna").decode("ascii").casefold().rstrip(".")
+    except (UnicodeError, ValueError):
+        return None
+    normalized = normalized.removeprefix("www.")
+    host = host.removeprefix("www.")
+    if (
+        parsed.scheme.casefold() != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+        or not normalized
+        or (host != normalized and not host.endswith("." + normalized))
+    ):
+        return None
+    return normalized
+
+
+def _crossref_linked_domain_search_hit(
+    work: ScholarlyWork,
+    seed_hit: dict[str, Any],
+    all_hits: list[dict[str, Any]],
+    *,
+    eligible_domains: set[str],
+) -> tuple[str, dict[str, Any]] | None:
+    """Tie a Crossref-linked publisher domain to a separate topic-matched hit.
+
+    Crossref content links can point at a publisher's sister domain instead of
+    the search-hit host. Accept that domain only when it is itself an eligible
+    HTTPS web-search candidate, the result independently matches the Crossref
+    title, and the publisher name/domain plus Crossref link agree. This verifies
+    a publisher/publication relationship only; the link's intended use does not
+    grant content-acquisition or reuse permission.
+    """
+    seed_domain = _normalized_web_hit_domain(seed_hit)
+    seed_text = _web_search_hit_identity_text(seed_hit)
+    if not seed_text or seed_domain not in eligible_domains:
+        return None
+    if _crossref_record_matches_publisher_domain(
+        work, seed_domain
+    ) and _publication_title_matches_search_lead(work.title, seed_text, minimum_overlap=0.65):
+        return seed_domain, seed_hit
+
+    metadata = work.provider_metadata.get("crossref_full_text")
+    links = metadata.get("links") if isinstance(metadata, dict) else None
+    if not isinstance(links, list):
+        return None
+    for record in links[:8]:
+        if not isinstance(record, dict) or not isinstance(record.get("url"), str):
+            continue
+        try:
+            parsed_link = urlsplit(record["url"])
+            link_port = parsed_link.port
+            linked_host = (
+                (parsed_link.hostname or "")
+                .encode("idna")
+                .decode("ascii")
+                .casefold()
+                .rstrip(".")
+                .removeprefix("www.")
+            )
+        except (UnicodeError, ValueError):
+            continue
+        if (
+            parsed_link.scheme.casefold() != "https"
+            or parsed_link.username is not None
+            or parsed_link.password is not None
+            or link_port not in {None, 443}
+            or not linked_host
+        ):
+            continue
+        for hit in all_hits:
+            candidate_domain = _normalized_web_hit_domain(hit)
+            if (
+                candidate_domain not in eligible_domains
+                or (
+                    linked_host != candidate_domain
+                    and not linked_host.endswith("." + candidate_domain)
+                )
+                or not _publication_title_matches_search_lead(
+                    work.title,
+                    _web_search_hit_identity_text(hit),
+                    minimum_overlap=0.65,
+                )
+                or not _crossref_record_matches_publisher_domain(work, candidate_domain)
+            ):
+                continue
+            return candidate_domain, hit
+    return None
+
+
+def _existing_crossref_web_publication(
+    records: list[dict[str, Any]],
+    *,
+    doi: str,
+    publisher: str,
+    publisher_search_lead_url: str,
+) -> dict[str, Any] | None:
+    """Find one already verified occurrence of the same DOI and publisher lead."""
+    normalized_doi = doi.strip().casefold()
+    normalized_publisher = " ".join(publisher.split()).casefold()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if (
+            isinstance(record.get("doi"), str)
+            and record["doi"].strip().casefold() == normalized_doi
+            and isinstance(record.get("publisher"), str)
+            and " ".join(record["publisher"].split()).casefold() == normalized_publisher
+            and record.get("publisher_domain_search_lead_url") == publisher_search_lead_url
+        ):
+            return record
+    return None
 
 
 def _crossref_publisher_identity_id(publisher: str, domain: str) -> str:
@@ -3194,7 +3342,9 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                         and not _stage_time_expired(job_snapshot)
                                     ):
                                         non_ror_crossref_lookups += 1
-                                        candidate_title = str(candidate_hit["title"]).strip()[:300]
+                                        candidate_search_text = _web_search_hit_identity_text(
+                                            candidate_hit
+                                        )
                                         candidate_doi = _doi_from_official_publication_url(
                                             str(candidate_hit["url"])
                                         )
@@ -3208,78 +3358,298 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                 ]
                                             else:
                                                 candidate_works = crossref.search(
-                                                    candidate_title, limit=3
+                                                    candidate_search_text, limit=3
                                                 )
                                             provider_counts["Crossref"] += len(candidate_works)
-                                            publisher_work = next(
+                                            publisher_match = next(
                                                 (
-                                                    work
+                                                    (work, *linked_domain_match)
                                                     for work in candidate_works
                                                     if work.doi
-                                                    and _publication_title_matches_search_lead(
-                                                        work.title,
-                                                        candidate_title,
-                                                        minimum_overlap=0.65,
-                                                    )
-                                                    and _crossref_record_matches_publisher_domain(
-                                                        work, domain
+                                                    and (
+                                                        linked_domain_match
+                                                        := _crossref_linked_domain_search_hit(
+                                                            work,
+                                                            candidate_hit,
+                                                            general_web_discovery["hits"],
+                                                            eligible_domains=set(candidate_domains),
+                                                        )
                                                     )
                                                 ),
                                                 None,
+                                            )
+                                            publisher_work = (
+                                                publisher_match[0] if publisher_match else None
+                                            )
+                                            publisher_domain = (
+                                                publisher_match[1] if publisher_match else None
+                                            )
+                                            publisher_hit = (
+                                                publisher_match[2] if publisher_match else None
                                             )
                                             if (
                                                 publisher_work is not None
                                                 and publisher_work.publisher
                                                 and publisher_work.doi
+                                                and publisher_domain
+                                                and publisher_hit
                                             ):
+                                                existing_publication = (
+                                                    _existing_crossref_web_publication(
+                                                        general_web_discovery[
+                                                            "verified_official_publications"
+                                                        ],
+                                                        doi=publisher_work.doi,
+                                                        publisher=publisher_work.publisher,
+                                                        publisher_search_lead_url=str(
+                                                            publisher_hit.get("url") or ""
+                                                        ),
+                                                    )
+                                                )
+                                                if existing_publication is not None:
+                                                    verification.update(
+                                                        {
+                                                            "domain": publisher_domain,
+                                                            "candidate_domain": domain,
+                                                            "publisher_search_lead_url": publisher_hit.get(
+                                                                "url"
+                                                            ),
+                                                            "status": "verified_crossref_publisher_domain",
+                                                            "organization_id": existing_publication.get(
+                                                                "organization_id"
+                                                            ),
+                                                            "canonical_name": existing_publication.get(
+                                                                "publisher"
+                                                            ),
+                                                            "verification_source": (
+                                                                "https://api.crossref.org/works/"
+                                                                + quote(
+                                                                    publisher_work.doi, safe="/()"
+                                                                )
+                                                            ),
+                                                            "verification_method": (
+                                                                "crossref_publisher_doi_title_and_linked_search_domain_match"
+                                                            ),
+                                                            "publication_doi": publisher_work.doi,
+                                                            "duplicate_publication_lead": True,
+                                                        }
+                                                    )
+                                                    general_web_discovery[
+                                                        "domain_verifications"
+                                                    ].append(verification)
+                                                    continue
                                                 organization_id = _crossref_publisher_identity_id(
-                                                    publisher_work.publisher, domain
+                                                    publisher_work.publisher, publisher_domain
                                                 )
                                                 identity_source = (
                                                     "https://api.crossref.org/works/"
                                                     + quote(publisher_work.doi, safe="/()")
                                                 )
+                                                ror_profile = None
+                                                try:
+                                                    organization_discovery.setdefault(
+                                                        "publisher_name_identity_requests_attempted",
+                                                        0,
+                                                    )
+                                                    organization_discovery[
+                                                        "publisher_name_identity_requests_attempted"
+                                                    ] += 1
+                                                    provider_query_counts.setdefault(
+                                                        "ROR publisher exact-name identity resolution",
+                                                        0,
+                                                    )
+                                                    provider_query_latencies_ms.setdefault(
+                                                        "ROR publisher exact-name identity resolution",
+                                                        [],
+                                                    )
+                                                    provider_failures.setdefault(
+                                                        "ROR publisher exact-name identity resolution",
+                                                        0,
+                                                    )
+                                                    provider_queries_attempted += 1
+                                                    provider_query_counts[
+                                                        "ROR publisher exact-name identity resolution"
+                                                    ] += 1
+                                                    ror_name_started = time.monotonic()
+                                                    try:
+                                                        ror_id = ror_provider.search_exact_id(
+                                                            publisher_work.publisher
+                                                        )
+                                                    finally:
+                                                        provider_query_latencies_ms[
+                                                            "ROR publisher exact-name identity resolution"
+                                                        ].append(
+                                                            max(
+                                                                0,
+                                                                round(
+                                                                    (
+                                                                        time.monotonic()
+                                                                        - ror_name_started
+                                                                    )
+                                                                    * 1000
+                                                                ),
+                                                            )
+                                                        )
+                                                    if ror_id:
+                                                        provider_query_counts.setdefault(
+                                                            "ROR organization verification", 0
+                                                        )
+                                                        provider_query_latencies_ms.setdefault(
+                                                            "ROR organization verification", []
+                                                        )
+                                                        provider_queries_attempted += 1
+                                                        provider_query_counts[
+                                                            "ROR organization verification"
+                                                        ] += 1
+                                                        ror_verify_started = time.monotonic()
+                                                        try:
+                                                            ror_profile = ror_provider.verify(
+                                                                ror_id
+                                                            )
+                                                        finally:
+                                                            provider_query_latencies_ms[
+                                                                "ROR organization verification"
+                                                            ].append(
+                                                                max(
+                                                                    0,
+                                                                    round(
+                                                                        (
+                                                                            time.monotonic()
+                                                                            - ror_verify_started
+                                                                        )
+                                                                        * 1000
+                                                                    ),
+                                                                )
+                                                            )
+                                                        if ror_profile.record_status == "active":
+                                                            persist_verified_identity(
+                                                                db, ror_profile
+                                                            )
+                                                            organization_id = ror_profile.ror_id
+                                                        else:
+                                                            ror_profile = None
+                                                except Exception:
+                                                    provider_failures[
+                                                        "ROR publisher exact-name identity resolution"
+                                                    ] += 1
+                                                    ror_profile = None
+                                                identity_name = (
+                                                    ror_profile.canonical_name
+                                                    if ror_profile is not None
+                                                    else publisher_work.publisher
+                                                )
+                                                official_domain = (
+                                                    publisher_domain
+                                                    if ror_profile is not None
+                                                    and ror_profile.matches_domain(publisher_domain)
+                                                    else None
+                                                )
+                                                identity_sources = [identity_source]
+                                                verification_method = "crossref_publisher_doi_title_and_linked_search_domain_match"
+                                                if ror_profile is not None:
+                                                    identity_sources.append(ror_profile.api_url)
+                                                    verification_method = "ror_exact_publisher_name_plus_crossref_linked_domain"
                                                 organization = {
                                                     "schema_version": 1,
                                                     "organization_id": organization_id,
                                                     "openalex_ids": [],
                                                     "openaire_ids": [],
-                                                    "canonical_name": publisher_work.publisher,
-                                                    "aliases": [],
-                                                    "organization_types": ["publisher"],
-                                                    "official_domains": [domain],
-                                                    "official_urls": [f"https://{domain}/"],
-                                                    "country_code": None,
-                                                    "identity_status": "VERIFIED_DOMAIN_SPECIALIST",
-                                                    "verification_method": (
-                                                        "crossref_publisher_doi_title_and_link_domain_match"
+                                                    "canonical_name": identity_name,
+                                                    "aliases": (
+                                                        list(ror_profile.aliases)
+                                                        if ror_profile is not None
+                                                        else []
                                                     ),
+                                                    "organization_types": (
+                                                        list(ror_profile.organization_types)
+                                                        if ror_profile is not None
+                                                        else ["publisher"]
+                                                    ),
+                                                    "official_domains": (
+                                                        list(ror_profile.domains)
+                                                        if ror_profile is not None
+                                                        else []
+                                                    ),
+                                                    "official_urls": (
+                                                        list(ror_profile.official_urls)
+                                                        if ror_profile is not None
+                                                        else []
+                                                    ),
+                                                    "publisher_linked_domains": [publisher_domain],
+                                                    "country_code": (
+                                                        ror_profile.country_code
+                                                        if ror_profile is not None
+                                                        else None
+                                                    ),
+                                                    "identity_status": "VERIFIED_DOMAIN_SPECIALIST",
+                                                    "verification_method": verification_method,
                                                     "verification_source": identity_source,
+                                                    "verification_sources": identity_sources,
                                                     "verification_timestamp": utcnow().isoformat(),
-                                                    "registry_match": False,
+                                                    "registry_match": organization_registry_match(
+                                                        ror_id=organization_id
+                                                        if organization_id.startswith(
+                                                            "https://ror.org/"
+                                                        )
+                                                        else None
+                                                    ),
                                                     "quality_assessment": "not_assessed",
                                                     "identity_evidence": [
                                                         {
-                                                            "type": "crossref_publisher_and_link_domain",
+                                                            "type": "crossref_publisher_doi_title_and_link_domain",
                                                             "doi": publisher_work.doi,
                                                             "title": publisher_work.title,
                                                             "publisher": publisher_work.publisher,
-                                                            "official_search_url": candidate_hit[
+                                                            "crossref_source": identity_source,
+                                                            "crossref_link_domain": publisher_domain,
+                                                            "publisher_linked_domain": publisher_domain,
+                                                            "search_lead_url": publisher_hit["url"],
+                                                            "initial_search_url": candidate_hit[
                                                                 "url"
                                                             ],
-                                                        }
+                                                        },
+                                                        *(
+                                                            [
+                                                                {
+                                                                    "type": "ror_exact_publisher_name",
+                                                                    "ror_id": ror_profile.ror_id,
+                                                                    "record_url": ror_profile.api_url,
+                                                                    "canonical_name": ror_profile.canonical_name,
+                                                                }
+                                                            ]
+                                                            if ror_profile is not None
+                                                            else []
+                                                        ),
+                                                        {
+                                                            "type": "question_search_domain_lead",
+                                                            "domain": publisher_domain,
+                                                            "title": publisher_hit.get("title"),
+                                                            "url": publisher_hit.get("url"),
+                                                        },
                                                     ],
                                                     "related_publications": [],
                                                     "limitations": [
-                                                        "Crossref independently links this DOI publisher record to the observed domain; this identity result does not establish organization-wide authority, methodology, quality, truth, or content rights."
+                                                        "Crossref publisher/title metadata and an eligible linked-domain result verify this publisher/publication relationship. An exact-name ROR record, when available, verifies the organization identity. These checks do not establish organization-wide authority, methodology, quality, truth, or content rights."
                                                     ],
                                                 }
                                                 dynamic_web_organizations.append(organization)
                                                 verification.update(
                                                     {
-                                                        "status": "verified_crossref_publisher_domain",
+                                                        "domain": publisher_domain,
+                                                        "official_domain_verified": official_domain
+                                                        is not None,
+                                                        "publisher_linked_domain": publisher_domain,
+                                                        "candidate_domain": domain,
+                                                        "publisher_search_lead_url": publisher_hit.get(
+                                                            "url"
+                                                        ),
+                                                        "status": (
+                                                            "verified_crossref_publisher_domain"
+                                                            if official_domain is not None
+                                                            else "publisher_linked_domain_not_independently_verified"
+                                                        ),
                                                         "organization_id": organization_id,
-                                                        "canonical_name": publisher_work.publisher,
+                                                        "canonical_name": identity_name,
                                                         "verification_source": identity_source,
                                                         "verification_method": organization[
                                                             "verification_method"
@@ -3292,12 +3662,15 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                 ].append(
                                                     {
                                                         "organization_id": organization_id,
-                                                        "canonical_name": publisher_work.publisher,
-                                                        "official_domain": domain,
+                                                        "canonical_name": identity_name,
+                                                        "official_domain": official_domain,
+                                                        "publisher_linked_domain": publisher_domain,
                                                         "identity_status": organization[
                                                             "identity_status"
                                                         ],
-                                                        "registry_match": False,
+                                                        "registry_match": organization[
+                                                            "registry_match"
+                                                        ],
                                                         "verification_source": identity_source,
                                                         "verification_method": organization[
                                                             "verification_method"
@@ -3307,7 +3680,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                 metadata = dict(publisher_work.provider_metadata)
                                                 metadata["organization_discovery"] = {
                                                     "organization_id": organization_id,
-                                                    "organization_name": publisher_work.publisher,
+                                                    "organization_name": identity_name,
                                                     "identity_status": organization[
                                                         "identity_status"
                                                     ],
@@ -3315,7 +3688,8 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                         "verification_method"
                                                     ],
                                                     "verification_source": identity_source,
-                                                    "official_domain": domain,
+                                                    "official_domain": official_domain,
+                                                    "publisher_linked_domain": publisher_domain,
                                                     "publisher_verification": (
                                                         "crossref_doi_title_publisher_and_link_domain_match"
                                                     ),
@@ -3325,7 +3699,8 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                     "discovery_path": (
                                                         "question_to_official_publication_hit_to_crossref_publisher_domain"
                                                     ),
-                                                    "official_publication_url": candidate_hit[
+                                                    "official_publication_url": publisher_work.url,
+                                                    "publisher_domain_search_lead_url": publisher_hit[
                                                         "url"
                                                     ],
                                                     "quality_assessment": "not_assessed",
@@ -3337,7 +3712,6 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                 }
                                                 verified_work = replace(
                                                     publisher_work,
-                                                    url=str(candidate_hit["url"]),
                                                     provider_metadata=versioned_provider_metadata(
                                                         publisher_work.provider, metadata
                                                     ),
@@ -3347,7 +3721,10 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                     "doi": publisher_work.doi,
                                                     "title": publisher_work.title,
                                                     "publisher": publisher_work.publisher,
-                                                    "official_url": candidate_hit["url"],
+                                                    "official_url": publisher_work.url,
+                                                    "publisher_domain_search_lead_url": publisher_hit[
+                                                        "url"
+                                                    ],
                                                     "source_provider": "Crossref",
                                                     "lookup_method": (
                                                         "crossref_publisher_link_domain_match"
@@ -3368,7 +3745,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                 for stored_hit in general_web_discovery["hits"]:
                                                     if (
                                                         stored_hit.get("url")
-                                                        == candidate_hit["url"]
+                                                        == publisher_hit["url"]
                                                     ):
                                                         stored_hit["organization_id"] = (
                                                             organization_id
@@ -12408,6 +12785,15 @@ def _report_search_coverage(
                 f"- Discovered organization: {name} [{identity}], domains: "
                 f"{safe_domains or 'none verified'}; quality not assessed."
             )
+            publisher_linked_domains = organization.get("publisher_linked_domains", [])
+            if isinstance(publisher_linked_domains, list) and publisher_linked_domains:
+                linked_domains = ", ".join(
+                    html.escape(str(value)) for value in publisher_linked_domains[:8]
+                )
+                lines.append(
+                    f"  - Publisher-linked candidate domain(s): {linked_domains}; "
+                    "official-domain ownership was not independently verified."
+                )
     if general_web_discovery:
         lines.append(
             "- General public-web discovery: "
@@ -12416,7 +12802,7 @@ def _report_search_coverage(
             f"{int(general_web_discovery.get('request_count', 0))} search request(s), "
             f"{int(general_web_discovery.get('preflight_request_count', 0))} read-only balance check(s); "
             f"{len(general_web_discovery.get('hits', []))} search lead(s), "
-            f"{len(general_web_discovery.get('newly_discovered_organizations', []))} verified-domain organization(s)."
+            f"{len(general_web_discovery.get('newly_discovered_organizations', []))} newly discovered organization identity record(s)."
         )
         lines.append(
             "  - Search-result snippets are discovery metadata only; they are not stored findings or evidence passages."
@@ -12450,11 +12836,12 @@ def _report_search_coverage(
                 if not isinstance(publication, dict):
                     continue
                 lines.append(
-                    "- Verified official-web publication: "
+                    "- Publisher-verified publication relationship: "
                     f"{html.escape(str(publication.get('title') or 'Title unavailable'))}; "
                     f"publisher: {html.escape(str(publication.get('publisher') or 'not recorded'))}; "
                     f"DOI: {html.escape(str(publication.get('doi') or 'not recorded'))}; "
-                    f"official page: {html.escape(str(publication.get('official_url') or 'not recorded'), quote=True)}; "
+                    f"publication link: {html.escape(str(publication.get('official_url') or 'not recorded'), quote=True)}; "
+                    f"verified-domain discovery lead: {html.escape(str(publication.get('publisher_domain_search_lead_url') or 'not recorded'), quote=True)}; "
                     f"selected: {bool(publication.get('selected', False))}; "
                     f"access: {html.escape(str(publication.get('retrieval_status') or 'metadata_only'))}; "
                     f"passages: {int(publication.get('passage_count', 0))}; "

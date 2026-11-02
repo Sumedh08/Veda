@@ -3498,7 +3498,13 @@ def test_model_synthesis_deduplicates_shared_passage_text_before_prompt_budget_c
 
 
 @pytest.mark.parametrize(
-    "verification_path", ["ror", "crossref_publisher_link", "official_page_metadata"]
+    "verification_path",
+    [
+        "ror",
+        "crossref_publisher_link",
+        "official_page_metadata",
+        "crossref_and_official_page_metadata",
+    ],
 )
 def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publication(
     client, monkeypatch, verification_path
@@ -3543,26 +3549,50 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         def search(self, query, *, limit=10):
             self.queries.append(query)
             site_search = query.startswith("site:windlab.example ")
-            return Crawl4AIWebSearchResult(
-                query=query,
-                provider="Crawl4AI Cloud",
-                searched_at="2026-11-01T12:00:00+00:00",
-                hits=(
+            if site_search and verification_path == "crossref_and_official_page_metadata":
+                hits = (
+                    Crawl4AIWebHit(
+                        title="Offshore wind transmission system dynamics in India",
+                        url="https://windlab.example/research/offshore-wind-dynamics",
+                        snippet="Untrusted search snippet; not stored as evidence.",
+                        source="gg",
+                        rank=1,
+                        normalized_domain="windlab.example",
+                    ),
+                    Crawl4AIWebHit(
+                        title="Offshore wind transmission policy response evidence report",
+                        url="https://windlab.example/reports/offshore-wind-transmission.html",
+                        snippet="Untrusted search snippet; not stored as evidence.",
+                        source="gg",
+                        rank=2,
+                        normalized_domain="windlab.example",
+                    ),
+                )
+            else:
+                hits = (
                     Crawl4AIWebHit(
                         title=(
                             "Offshore wind transmission system dynamics in India"
-                            if verification_path == "crossref_publisher_link" and not site_search
+                            if verification_path
+                            in {"crossref_publisher_link", "crossref_and_official_page_metadata"}
+                            and not site_search
+                            else "Offshore wind transmission policy response evidence report"
+                            if site_search
+                            and verification_path == "crossref_and_official_page_metadata"
                             else "Offshore wind transmission planning in India engineering report"
                             if site_search
                             else "Unseeded Wind Systems Laboratory research report"
                         ),
                         url=(
                             "https://windlab.example/reports/offshore-wind-transmission.html"
-                            if site_search and verification_path == "official_page_metadata"
+                            if site_search
+                            and verification_path
+                            in {"official_page_metadata", "crossref_and_official_page_metadata"}
                             else "https://windlab.example/reports/offshore-wind-transmission-study"
                             if site_search
                             else "https://windlab.example/research/offshore-wind-transmission"
-                            if verification_path == "crossref_publisher_link"
+                            if verification_path
+                            in {"crossref_publisher_link", "crossref_and_official_page_metadata"}
                             else "https://windlab.example/reports/offshore-wind-transmission.html"
                             if verification_path == "official_page_metadata"
                             else "https://windlab.example/reports/offshore-wind-transmission"
@@ -3572,7 +3602,12 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
                         rank=1,
                         normalized_domain="windlab.example",
                     ),
-                ),
+                )
+            return Crawl4AIWebSearchResult(
+                query=query,
+                provider="Crawl4AI Cloud",
+                searched_at="2026-11-01T12:00:00+00:00",
+                hits=hits,
                 reported_cost_credits=1.0,
                 balance_credits=99.0,
                 allowance_left_credits=89.0,
@@ -3587,19 +3622,29 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
             assert domain == "windlab.example"
             return (
                 "https://ror.org/03yrm5c26"
-                if verification_path in {"ror", "official_page_metadata"}
+                if verification_path
+                in {"ror", "official_page_metadata", "crossref_and_official_page_metadata"}
                 else None
             )
 
         def verify(self, ror_id):
-            assert verification_path in {"ror", "official_page_metadata"}
+            assert verification_path in {
+                "ror",
+                "official_page_metadata",
+                "crossref_and_official_page_metadata",
+            }
             return ROROrganization(
                 ror_id=ror_id,
                 canonical_name="Unseeded Wind Systems Laboratory",
                 aliases=("UWSL",),
                 organization_types=("nonprofit",),
-                domains=("windlab.example",),
-                official_urls=("https://windlab.example/about",),
+                domains=(
+                    ()
+                    if verification_path
+                    in {"official_page_metadata", "crossref_and_official_page_metadata"}
+                    else ("windlab.example",)
+                ),
+                official_urls=("https://www.windlab.example/about",),
                 country_code="IN",
                 record_status="active",
                 last_modified="2026-10-20",
@@ -3621,7 +3666,7 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
             assert organization["canonical_name"] == "Unseeded Wind Systems Laboratory"
             assert organization["identity_status"] == (
                 "VERIFIED_ESTABLISHED"
-                if verification_path == "ror"
+                if verification_path in {"ror", "crossref_and_official_page_metadata"}
                 else "VERIFIED_DOMAIN_SPECIALIST"
             )
             return OfficialSitePublicationSearchResult(
@@ -3637,7 +3682,10 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
             )
 
         def verify_publication_page(self, organization, publication_url, *, expected_title):
-            assert verification_path == "official_page_metadata"
+            assert verification_path in {
+                "official_page_metadata",
+                "crossref_and_official_page_metadata",
+            }
             assert organization["canonical_name"] == "Unseeded Wind Systems Laboratory"
             assert publication_url.endswith(".html")
             assert "Offshore wind transmission" in expected_title
@@ -3664,7 +3712,11 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
 
         def search(self, query, *, limit=5):
             type(self).queries.append(query)
-            if query == "Offshore wind transmission system dynamics in India":
+            if (
+                query == "Offshore wind transmission system dynamics in India"
+                and verification_path
+                in {"crossref_publisher_link", "crossref_and_official_page_metadata"}
+            ):
                 return [
                     ScholarlyWork(
                         external_id="doi:10.5555/offshore-wind-dynamics",
@@ -3793,9 +3845,7 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
     assert event["data"]["general_web_discovery"]["searches"][1]["purpose"] == (
         "verified_official_domain_publication_discovery"
     )
-    verified_publications = event["data"]["general_web_discovery"][
-        "verified_official_publications"
-    ]
+    verified_publications = event["data"]["general_web_discovery"]["verified_official_publications"]
     if verification_path == "official_page_metadata":
         assert len(verified_publications) == 1
         assert verified_publications[0]["doi"] is None
@@ -3803,22 +3853,42 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
             "official_page_metadata_verified"
         )
         assert verified_publications[0]["page_body_retained"] is False
+    elif verification_path == "crossref_and_official_page_metadata":
+        assert any(
+            item.get("doi") == "10.5555/offshore-wind-dynamics" for item in verified_publications
+        ), json.dumps(
+            event["data"]["general_web_discovery"].get("publication_verification_attempts"),
+            indent=2,
+        )
+        assert any(
+            item.get("publisher_verification") == "official_page_metadata_verified"
+            and item.get("doi") is None
+            for item in verified_publications
+        )
+        page_attempt = next(
+            item
+            for item in event["data"]["general_web_discovery"]["publication_verification_attempts"]
+            if item.get("verification_method")
+            == "verified_domain_robots_and_page_metadata_title_match"
+        )
+        assert page_attempt["search_title"] == (
+            "Offshore wind transmission policy response evidence report"
+        )
     else:
         assert any(
-            item["doi"] == "10.5555/offshore-wind-transmission"
-            for item in verified_publications
+            item["doi"] == "10.5555/offshore-wind-transmission" for item in verified_publications
         )
         assert verified_publications[0]["lookup_method"] == (
             "crossref_title_search"
             if verification_path == "ror"
             else "crossref_publisher_link_domain_match"
         )
-    assert (
-        "Offshore wind transmission system dynamics in India" in EmptyCrossref.queries
-        if verification_path == "crossref_publisher_link"
+    expected_crossref_query = (
+        "Offshore wind transmission system dynamics in India"
+        if verification_path in {"crossref_publisher_link", "crossref_and_official_page_metadata"}
         else "Offshore wind transmission planning in India engineering report"
-        in EmptyCrossref.queries
     )
+    assert expected_crossref_query in EmptyCrossref.queries
     dynamic_org = next(
         item
         for item in event["data"]["organization_discovery"]["organizations"]
@@ -3826,7 +3896,8 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
     )
     assert dynamic_org["identity_status"] == (
         "VERIFIED_ESTABLISHED"
-        if verification_path in {"ror", "official_page_metadata"}
+        if verification_path
+        in {"ror", "official_page_metadata", "crossref_and_official_page_metadata"}
         else "VERIFIED_DOMAIN_SPECIALIST"
     )
     assert dynamic_org["registry_match"] is False
@@ -3838,7 +3909,7 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         for item in event["data"]["organization_discovery"]["publication_searches"]
     )
     assert all(source["title"] != publication.title for source in sources)
-    if verification_path == "official_page_metadata":
+    if verification_path in {"official_page_metadata", "crossref_and_official_page_metadata"}:
         verified_source = next(
             source
             for source in sources
@@ -3857,9 +3928,7 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
             "not_retrieved"
         )
         assert verified_source["abstract_excerpt"] is None
-        assert client.get(
-            f"/api/v1/research-jobs/{job['id']}/claims"
-        ).json()["items"] == []
+        assert client.get(f"/api/v1/research-jobs/{job['id']}/claims").json()["items"] == []
 
         # Continue through the real persisted workflow with inference disabled.
         # Metadata identity must remain inspectable without becoming evidence.
@@ -3869,9 +3938,7 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         assert report["id"]
         inspection = client.get(f"/api/v1/reports/{report['id']}/inspection").json()
         report_source = next(
-            item
-            for item in inspection["sources"]
-            if item["id"] == verified_source["id"]
+            item for item in inspection["sources"] if item["id"] == verified_source["id"]
         )
         assert inspection["claims"] == []
         assert report_source["retrieval_status"] == "metadata_only"
@@ -3879,20 +3946,24 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         assert report_source["organization_provenance"]["publication_rights_status"] == (
             "not_assessed_metadata_only"
         )
-        assert "Offshore wind transmission planning in India engineering report" in report[
-            "body_markdown"
-        ]
-        assert "https://windlab.example/reports/offshore-wind-transmission.html" in report[
-            "body_markdown"
-        ]
+        assert (
+            "Offshore wind transmission planning in India engineering report"
+            in report["body_markdown"]
+        )
+        assert (
+            "https://windlab.example/reports/offshore-wind-transmission.html"
+            in report["body_markdown"]
+        )
         assert any(
             citation.get("source_id") == verified_source["id"]
             for citation in report["citation_map"].values()
         )
         search_coverage = report["verification"]["search_coverage"]
-        reconciled = search_coverage["general_web_discovery"][
-            "verified_official_publications"
-        ][0]
+        reconciled = next(
+            item
+            for item in search_coverage["general_web_discovery"]["verified_official_publications"]
+            if item.get("publisher_verification") == "official_page_metadata_verified"
+        )
         assert reconciled["selected"] is True
         assert reconciled["source_id"] == verified_source["id"]
         assert reconciled["retrieval_status"] == "metadata_only"

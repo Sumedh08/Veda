@@ -430,9 +430,21 @@ class WordPressPublicationSearchProvider:
                     if response.status_code == 404 and allow_not_found:
                         return b"", requests_attempted
                     if response.status_code != 200:
-                        raise OfficialSitePublicationSearchError(
-                            "provider_unavailable", request_dispatched=True
-                        )
+                        if response.status_code == 401:
+                            code = "authentication_required"
+                        elif response.status_code == 403:
+                            code = "access_denied"
+                        elif response.status_code == 404:
+                            code = "not_found"
+                        elif response.status_code == 429:
+                            code = "rate_limited"
+                        elif 500 <= response.status_code <= 599:
+                            code = "upstream_server_error"
+                        elif 400 <= response.status_code <= 499:
+                            code = "upstream_client_error"
+                        else:
+                            code = "unexpected_http_status"
+                        raise OfficialSitePublicationSearchError(code, request_dispatched=True)
                     content_type = (
                         response.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
                     )

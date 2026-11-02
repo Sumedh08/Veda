@@ -3326,11 +3326,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                     provider_query_counts["ROR organization verification"] += 1
                                     provider_queries_attempted += 1
                                     ror_profile = ror_provider.verify(ror_id)
-                                domain_matches = any(
-                                    candidate.casefold().rstrip(".").removeprefix("www.")
-                                    == domain.casefold().rstrip(".").removeprefix("www.")
-                                    for candidate in ror_profile.domains
-                                )
+                                domain_matches = ror_profile.matches_domain(domain)
                                 is_verified = (
                                     ror_profile.record_status == "active" and domain_matches
                                 )
@@ -3710,16 +3706,53 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                             page_metadata_request_count = 0
                             page_metadata_origin_request_attempts = 0
                             page_metadata_provider_name = "Official publication page metadata"
-                            if not verified_publications and not _stage_time_expired(job_snapshot):
-                                # Crossref does not index many official institutional reports.
-                                # Verify one bounded HTML result on the exact ROR-verified
-                                # domain; never treat its search snippet as source evidence.
+                            page_metadata_already_verified = any(
+                                item.get("publisher_verification")
+                                == "official_page_metadata_verified"
+                                for item in verified_publications
+                            )
+                            if not page_metadata_already_verified and not _stage_time_expired(
+                                job_snapshot
+                            ):
+                                # Crossref verification of one result does not verify every
+                                # official publication surfaced by the domain search. Verify
+                                # at most one additional, unmatched publication page on
+                                # the exact ROR-verified domain. Preserve provider ranking
+                                # order and reject generic index/home pages; never treat its
+                                # search snippet as source evidence.
                                 metadata_hit = None
+                                crossref_verified_urls = {
+                                    str(item.get("official_url", ""))
+                                    .split("#", 1)[0]
+                                    .casefold()
+                                    .rstrip("/")
+                                    for item in verified_publications
+                                    if item.get("official_url")
+                                }
                                 for candidate_hit in domain_hits:
                                     try:
                                         candidate_url = urlsplit(candidate_hit.url)
                                         candidate_path = candidate_url.path.casefold().rstrip("/")
                                     except ValueError:
+                                        continue
+                                    if (
+                                        candidate_hit.url.split("#", 1)[0].casefold().rstrip("/")
+                                        in crossref_verified_urls
+                                    ):
+                                        continue
+                                    if candidate_path in {
+                                        "/about",
+                                        "/insights",
+                                        "/news",
+                                        "/publication",
+                                        "/publications",
+                                        "/project",
+                                        "/projects",
+                                        "/report",
+                                        "/reports",
+                                        "/research",
+                                        "/search",
+                                    }:
                                         continue
                                     if (
                                         not candidate_path
@@ -3730,8 +3763,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                     ):
                                         continue
                                     metadata_hit = candidate_hit
-                                    if candidate_path.endswith((".html", ".htm")):
-                                        break
+                                    break
                                 if metadata_hit is not None:
                                     metadata_attempt = {
                                         "official_url": metadata_hit.url,
@@ -3894,9 +3926,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                         ].append(
                                             {
                                                 **verified_publication,
-                                                "organization_id": organization[
-                                                    "organization_id"
-                                                ],
+                                                "organization_id": organization["organization_id"],
                                             }
                                         )
                                         metadata_attempt.update(
@@ -3906,9 +3936,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                             metadata_kind=page_metadata.metadata_kind,
                                             request_count=page_metadata.request_count,
                                         )
-                                        for stored_hit in reversed(
-                                            general_web_discovery["hits"]
-                                        ):
+                                        for stored_hit in reversed(general_web_discovery["hits"]):
                                             if stored_hit.get("url") == metadata_hit.url:
                                                 stored_hit["candidate_status"] = (
                                                     "official_page_metadata_verified"
@@ -3939,11 +3967,13 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                         if metadata_request_attempts["count"]:
                                             provider_name = page_metadata_provider_name
                                             provider_query_counts.setdefault(provider_name, 0)
-                                            provider_query_latencies_ms.setdefault(provider_name, [])
-                                            provider_counts.setdefault(provider_name, 0)
-                                            provider_queries_attempted += (
-                                                metadata_request_attempts["count"]
+                                            provider_query_latencies_ms.setdefault(
+                                                provider_name, []
                                             )
+                                            provider_counts.setdefault(provider_name, 0)
+                                            provider_queries_attempted += metadata_request_attempts[
+                                                "count"
+                                            ]
                                             provider_query_counts[provider_name] += (
                                                 metadata_request_attempts["count"]
                                             )
@@ -3955,8 +3985,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                 max(
                                                     0,
                                                     round(
-                                                        (time.monotonic() - metadata_started)
-                                                        * 1000
+                                                        (time.monotonic() - metadata_started) * 1000
                                                     ),
                                                 )
                                             )
@@ -3980,14 +4009,12 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                 ],
                                 "publications": verified_publications,
                                 "request_count": (
-                                    crossref_lookup_count
-                                    + page_metadata_origin_request_attempts
+                                    crossref_lookup_count + page_metadata_origin_request_attempts
                                 ),
                                 "crossref_request_count": crossref_lookup_count,
                                 "page_metadata_request_count": page_metadata_request_count,
                                 "request_dispatched": (
-                                    crossref_lookup_count > 0
-                                    or page_metadata_request_count > 0
+                                    crossref_lookup_count > 0 or page_metadata_request_count > 0
                                 ),
                                 "content_fetched": False,
                                 "rights_status": "metadata_only_not_assessed",
@@ -11773,9 +11800,15 @@ def _report_search_coverage(
             )
     selected_organization_publications = []
     selected_organization_by_identity: dict[tuple[str, str], dict[str, Any]] = {}
-    for source_id, external_id, title, doi, source_url, metadata, retrieval_status in (
-        selected_organization_sources
-    ):
+    for (
+        source_id,
+        external_id,
+        title,
+        doi,
+        source_url,
+        metadata,
+        retrieval_status,
+    ) in selected_organization_sources:
         provider_metadata = (
             metadata.get("provider_metadata") if isinstance(metadata, dict) else None
         )
@@ -11949,10 +11982,8 @@ def _report_search_coverage(
                                     else search_publication.get("rights_status")
                                 ),
                             )
-                    if (
-                        str(search.get("provider", "")).startswith(
-                            "Official website search plus Crossref"
-                        )
+                    if str(search.get("provider", "")).startswith(
+                        "Official website search plus Crossref"
                     ):
                         search["content_fetched"] = any(
                             isinstance(item, dict) and item.get("content_fetched") is True

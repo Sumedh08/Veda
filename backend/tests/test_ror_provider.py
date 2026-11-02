@@ -136,11 +136,18 @@ def test_ror_search_resolves_only_an_exact_verified_domain_match():
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        assert request.url.params["query.advanced"] == 'domains:"ucri.example"'
+        assert request.url.params["query.advanced"] == (
+            '(domains:"ucri.example" OR links.value:"ucri.example")'
+        )
         payload = {
             "items": [
                 _ror_record(),
-                {**_ror_record(), "id": "https://ror.org/00tjv0s33", "domains": ["other.example"]},
+                {
+                    **_ror_record(),
+                    "id": "https://ror.org/00tjv0s33",
+                    "domains": ["other.example"],
+                    "links": [{"type": "website", "value": "https://other.example/about"}],
+                },
             ]
         }
         return httpx.Response(200, json=payload)
@@ -151,6 +158,60 @@ def test_ror_search_resolves_only_an_exact_verified_domain_match():
 
     assert ror_id == "https://ror.org/03yrm5c26"
     assert len(requests) == 1
+
+
+def test_ror_search_can_match_official_website_when_domains_field_is_empty():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        **_ror_record(),
+                        "domains": [],
+                        "links": [
+                            {
+                                "type": "website",
+                                "value": "https://www.ucri.example/",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+    provider = RORProvider(httpx.Client(transport=httpx.MockTransport(handler)))
+    ror_id = provider.search_exact_domain("ucri.example")
+    provider.close()
+
+    assert ror_id == "https://ror.org/03yrm5c26"
+
+
+def test_ror_domain_lookup_does_not_treat_non_website_links_as_official_domains():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        **_ror_record(),
+                        "domains": [],
+                        "links": [
+                            {
+                                "type": "wikipedia",
+                                "value": "https://ucri.example/",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+    provider = RORProvider(httpx.Client(transport=httpx.MockTransport(handler)))
+    ror_id = provider.search_exact_domain("ucri.example")
+    provider.close()
+
+    assert ror_id is None
 
 
 def test_ror_domain_search_rejects_ambiguous_or_untrusted_domains():

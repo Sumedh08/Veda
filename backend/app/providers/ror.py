@@ -13,6 +13,32 @@ import httpx
 ROR_API_BASE = "https://api.ror.org/v2/organizations"
 ROR_ID_RE = re.compile(r"(?:https://ror\.org/)?([0-9a-z]{9})/?", re.IGNORECASE)
 MAX_ROR_RESPONSE_BYTES = 512_000
+_DOMAIN_PATTERN = re.compile(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
+
+
+def _normalized_domain(value: object, *, website_url: bool = False) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    candidate = value.strip()
+    if website_url:
+        try:
+            parsed = urlsplit(candidate)
+            if (
+                parsed.scheme.casefold() != "https"
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.port not in {None, 443}
+            ):
+                return None
+            candidate = parsed.hostname or ""
+        except ValueError:
+            return None
+    try:
+        normalized = candidate.encode("idna").decode("ascii").casefold().rstrip(".")
+    except UnicodeError:
+        return None
+    normalized = normalized.removeprefix("www.")
+    return normalized if _DOMAIN_PATTERN.fullmatch(normalized) else None
 
 
 class RORProviderError(Exception):
@@ -36,6 +62,17 @@ class ROROrganization:
     last_modified: str | None
     retrieved_at: str
     api_url: str
+
+    def matches_domain(self, expected_domain: str) -> bool:
+        """Match exact official domains or HTTPS website links from the ROR record."""
+        expected = _normalized_domain(expected_domain)
+        if expected is None:
+            return False
+        if any(_normalized_domain(value) == expected for value in self.domains):
+            return True
+        return any(
+            _normalized_domain(value, website_url=True) == expected for value in self.official_urls
+        )
 
 
 class RORProvider:
@@ -123,28 +160,21 @@ class RORProvider:
         """Resolve a web-discovered host only when ROR records that exact domain.
 
         ROR's advanced query supports website-domain lookup. The result is still
-        rechecked for an exact domain match locally; search ranking alone is not
-        accepted as identity evidence.
+        rechecked locally against its domains and HTTPS website links; search
+        ranking alone is not accepted as identity evidence. Some records publish
+        an official website link but omit the redundant domains field.
         """
-        domain = (
-            expected_domain.strip().casefold().rstrip(".")
-            if isinstance(expected_domain, str)
-            else ""
-        )
-        domain = domain.removeprefix("www.")
-        if (
-            not domain
-            or len(domain) > 253
-            or not re.fullmatch(
-                r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}", domain
-            )
-        ):
+        domain = _normalized_domain(expected_domain)
+        if domain is None:
             raise RORProviderError("ROR domain query is invalid", code="invalid_domain")
         try:
             with self.client.stream(
                 "GET",
                 ROR_API_BASE,
-                params={"query.advanced": f'domains:"{domain}"', "page": 1},
+                params={
+                    "query.advanced": f'(domains:"{domain}" OR links.value:"{domain}")',
+                    "page": 1,
+                },
                 headers={"Accept": "application/json"},
             ) as response:
                 if 300 <= response.status_code < 400:
@@ -177,11 +207,17 @@ class RORProvider:
             raw_id = item.get("id")
             id_match = ROR_ID_RE.fullmatch(raw_id.strip()) if isinstance(raw_id, str) else None
             domains = item.get("domains")
+            links = item.get("links")
             exact_domain = isinstance(domains, list) and any(
-                isinstance(value, str)
-                and value.casefold().rstrip(".").removeprefix("www.") == domain
-                for value in domains
+                _normalized_domain(value) == domain for value in domains
             )
+            if not exact_domain and isinstance(links, list):
+                exact_domain = any(
+                    isinstance(link, dict)
+                    and link.get("type") == "website"
+                    and _normalized_domain(link.get("value"), website_url=True) == domain
+                    for link in links
+                )
             if id_match and exact_domain:
                 matches.add(id_match.group(1).casefold())
         if len(matches) > 1:

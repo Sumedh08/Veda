@@ -313,6 +313,44 @@ def test_verified_publication_page_fails_closed_when_robots_disallows_fetch():
 
 
 @pytest.mark.parametrize(
+    ("status_code", "expected_code"),
+    [
+        (401, "authentication_required"),
+        (403, "access_denied"),
+        (429, "rate_limited"),
+        (503, "upstream_server_error"),
+    ],
+)
+def test_verified_publication_page_preserves_terminal_http_failure_class(
+    status_code, expected_code
+):
+    requested_paths = []
+
+    def handler(request):
+        requested_paths.append(request.url.path)
+        return httpx.Response(status_code)
+
+    provider = WordPressPublicationSearchProvider(
+        client=httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False),
+        public_resolver=lambda *_args: ["8.8.8.8"],
+    )
+    try:
+        with pytest.raises(OfficialSitePublicationSearchError) as raised:
+            provider.verify_publication_page(
+                _organization_for_metadata_verification(),
+                "https://fao.example/reports/food-security",
+                expected_title="Food security policy evidence",
+            )
+    finally:
+        provider.close()
+
+    assert raised.value.code == expected_code
+    assert raised.value.request_dispatched is True
+    assert raised.value.requests_attempted == 1
+    assert requested_paths == ["/robots.txt"]
+
+
+@pytest.mark.parametrize(
     ("page_response", "expected_code"),
     [
         (

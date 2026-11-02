@@ -781,6 +781,15 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
             retrieval_status?: string;
             passage_count?: number;
           }>;
+          publication_verification_attempts?: Array<{
+            official_url: string;
+            search_title: string;
+            status: string;
+            verification_method?: string;
+            error_code?: string;
+            request_count?: number;
+            body_retained?: boolean;
+          }>;
         };
         conditional_statistics_routing: {
           status: string;
@@ -809,6 +818,18 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
   const officialPageMetadataPublication = generalWebDiscovery?.verified_official_publications.find(
     (publication) => publication.publisher_verification === 'official_page_metadata_verified',
   );
+  const blockedOfficialPageMetadataAttempt = generalWebDiscovery?.publication_verification_attempts?.find(
+    (attempt) => attempt.status === 'not_verified' && attempt.error_code === 'access_denied',
+  );
+  const blockedOfficialPageDomain = blockedOfficialPageMetadataAttempt
+    ? new URL(blockedOfficialPageMetadataAttempt.official_url).hostname
+    : null;
+  const blockedOfficialPageOrganization = blockedOfficialPageDomain
+    ? generalWebDiscovery?.newly_discovered_organizations.find((organization) =>
+      blockedOfficialPageDomain === organization.official_domain
+      || blockedOfficialPageDomain.endsWith(`.${organization.official_domain}`),
+    )
+    : undefined;
   if (crawl4aiLiveMode) {
     expect(generalWebDiscovery).toBeTruthy();
     expect(generalWebDiscovery?.preflight_status).toBe('reported');
@@ -826,25 +847,63 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
     )).toBe(generalWebDiscovery?.newly_discovered_organizations.length > 0);
   }
   if (requireOfficialPageMetadata) {
-    expect(officialPageMetadataPublication, 'a search-discovered official page must pass bounded metadata verification').toBeTruthy();
-    expect(officialPageMetadataPublication?.selected).toBe(true);
-    expect(officialPageMetadataPublication?.source_id).toBeTruthy();
-    expect(officialPageMetadataPublication?.doi).toBeNull();
-    expect(officialPageMetadataPublication?.content_fetched).toBe(false);
-    expect(officialPageMetadataPublication?.page_body_retained).toBe(false);
-    expect(officialPageMetadataPublication?.rights_status).toBe('not_assessed_metadata_only');
-    expect(officialPageMetadataPublication?.retrieval_status).toBe('metadata_only');
-    expect(officialPageMetadataPublication?.passage_count).toBe(0);
-    expect(Object.values(report.citation_map).some((citation) =>
-      citation.source_id === officialPageMetadataPublication?.source_id,
-    )).toBe(true);
+    if (officialPageMetadataPublication) {
+      expect(officialPageMetadataPublication.selected).toBe(true);
+      expect(officialPageMetadataPublication.source_id).toBeTruthy();
+      expect(officialPageMetadataPublication.doi).toBeNull();
+      expect(officialPageMetadataPublication.content_fetched).toBe(false);
+      expect(officialPageMetadataPublication.page_body_retained).toBe(false);
+      expect(officialPageMetadataPublication.rights_status).toBe('not_assessed_metadata_only');
+      expect(officialPageMetadataPublication.retrieval_status).toBe('metadata_only');
+      expect(officialPageMetadataPublication.passage_count).toBe(0);
+      expect(Object.values(report.citation_map).some((citation) =>
+        citation.source_id === officialPageMetadataPublication.source_id,
+      )).toBe(true);
+    } else {
+      expect(
+        blockedOfficialPageMetadataAttempt,
+        'a denied page must be recorded as a terminal access restriction, not as a missing success',
+      ).toBeTruthy();
+      expect(blockedOfficialPageMetadataAttempt?.request_count).toBeGreaterThan(0);
+      expect(blockedOfficialPageMetadataAttempt?.body_retained).toBe(false);
+      expect(blockedOfficialPageMetadataAttempt?.search_title.toLowerCase()).toContain('food price');
+      expect(new URL(blockedOfficialPageMetadataAttempt!.official_url).pathname).toContain('/publication/');
+      expect(blockedOfficialPageOrganization).toBeTruthy();
+      const metadataOnlyFallback = generalWebDiscovery?.verified_official_publications.find(
+        (publication) => publication.selected
+          && publication.organization_id === blockedOfficialPageOrganization?.organization_id
+          && publication.source_id
+          && publication.publisher_verification === 'verified'
+          && publication.rights_status === 'metadata_only_not_assessed',
+      );
+      expect(metadataOnlyFallback, 'a separately verified publication should remain reportable').toBeTruthy();
+      expect(Object.values(report.citation_map).some((citation) =>
+        citation.source_id === metadataOnlyFallback?.source_id,
+      )).toBe(true);
+    }
   }
-  expect(report.verification.search_coverage.institutional_publication_search).toMatchObject({
-    status: worldBankTermsConfirmed ? 'completed' : 'not_attempted_terms_confirmation_required',
-    request_dispatched: worldBankTermsConfirmed,
-    content_fetched: false,
-    rights_status: 'not_assessed',
-  });
+  const institutionalPublicationSearch =
+    report.verification.search_coverage.institutional_publication_search;
+  if (worldBankTermsConfirmed) {
+    expect(institutionalPublicationSearch).toMatchObject({
+      status: 'completed',
+      request_dispatched: true,
+      content_fetched: false,
+      rights_status: 'not_assessed',
+    });
+  } else {
+    // The source planner may correctly omit this connector for a question that
+    // does not warrant it, or record the explicit terms gate when it does.
+    expect([
+      'not_planned',
+      'not_attempted_terms_confirmation_required',
+    ]).toContain(institutionalPublicationSearch.status);
+    expect(institutionalPublicationSearch).toMatchObject({
+      request_dispatched: false,
+      content_fetched: false,
+      rights_status: 'not_assessed',
+    });
+  }
   expect(report.verification.search_coverage.government_publication_search).toMatchObject({
     status: govukLiveMode ? 'completed' : 'not_applicable_explicit_uk_geography_required',
     provider: 'GOV.UK Search API',
@@ -1091,6 +1150,27 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
     await expect(pageMetadataInspector).toContainText('not retrieved');
     await expect(pageMetadataInspector).not.toContainText('Passages in evidence ledger');
     await pageMetadataInspector.getByRole('button', { name: 'Close source inspector' }).click();
+  } else if (requireOfficialPageMetadata && blockedOfficialPageMetadataAttempt) {
+    const metadataOnlyFallback = generalWebDiscovery?.verified_official_publications.find(
+      (publication) => publication.selected
+        && publication.organization_id === blockedOfficialPageOrganization?.organization_id
+        && publication.source_id
+        && publication.publisher_verification === 'verified'
+        && publication.rights_status === 'metadata_only_not_assessed',
+    );
+    expect(metadataOnlyFallback).toBeTruthy();
+    await page.getByRole('button', {
+      name: `Inspect organization-discovered publication ${metadataOnlyFallback!.title}`,
+    }).click();
+    const metadataOnlyInspector = page.locator('.evidence-drawer');
+    await expect(metadataOnlyInspector).toContainText('Organization discovery provenance');
+    await expect(metadataOnlyInspector).toContainText('Publication publisher check');
+    await expect(metadataOnlyInspector).toContainText('verified organization domain');
+    await expect(metadataOnlyInspector).toContainText('Publication rights');
+    await expect(metadataOnlyInspector).toContainText('metadata only not assessed');
+    await expect(metadataOnlyInspector).toContainText('not retrieved');
+    await expect(metadataOnlyInspector).not.toContainText('Passages in evidence ledger');
+    await metadataOnlyInspector.getByRole('button', { name: 'Close source inspector' }).click();
   }
   const organizationPublication = report.verification.search_coverage.organization_discovery.selected_publications[0];
   if (requireUnseededSpecialist) {
@@ -1112,7 +1192,7 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
     expect(discoveredOrganization?.registry_match).toBe(false);
     const officialSiteSearch = searchCoverage.organization_discovery.publication_searches.find((search) =>
       search.organization_id === newlyDiscoveredOrganization?.organization_id
-      && search.provider === 'Official website search plus Crossref DOI resolution'
+      && search.provider?.startsWith('Official website search plus Crossref') === true
       && search.status === 'completed'
       && search.returned_count > 0,
     );

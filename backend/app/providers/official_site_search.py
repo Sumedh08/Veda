@@ -701,14 +701,19 @@ class WordPressPublicationSearchProvider:
         if not _host_is_in_verified_domain(host, domains) or parsed.path in {"", "/"}:
             raise OfficialSitePublicationSearchError("unverified_publication_host")
 
-        robots_body, robots_requests, robots_http_status = self._get(
-            f"https://{host}/robots.txt",
-            params=None,
-            maximum=64_000,
-            expected="text/plain",
-            verified_domains=domains,
-            allow_http_4xx=True,
-        )
+        try:
+            robots_body, robots_requests, robots_http_status = self._get(
+                f"https://{host}/robots.txt",
+                params=None,
+                maximum=64_000,
+                expected="text/plain",
+                verified_domains=domains,
+                allow_http_4xx=True,
+            )
+        except OfficialSitePublicationSearchError as exc:
+            if exc.code == "unexpected_content_type":
+                exc.code = "robots_invalid_media_type"
+            raise
         robots = None
         if robots_body:
             robots = RobotFileParser()

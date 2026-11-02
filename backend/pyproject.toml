@@ -29,6 +29,9 @@ dev = [
   "setuptools>=75",
   "wheel",
 ]
+mcp = [
+  "mcp==2.3.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

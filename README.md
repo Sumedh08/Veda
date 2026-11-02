@@ -78,6 +78,25 @@ The Preferences and data panel supports a full owner-scoped Veda-data export and
 
 The user-supplied build package and working research-run artifacts are kept outside this public source snapshot. Current product requirements, architecture decisions, source-verification notes, and implementation status are maintained in `docs/`; research leads remain distinct from verified evidence.
 
+## Optional local MCP evidence access
+
+Veda has an optional read-only stdio MCP façade over its existing authenticated API. It can search the signed-in user's saved source records, inspect provenance, and retrieve bounded source-linked passage excerpts. It never fetches raw documents or connects directly to the database. The MCP output gate is stricter than local research: it returns passage text only when Veda records item-level CC-BY 4.0 or CC0 sharing evidence plus complete document/passage hashes. Private-research-only, citation-only, or uncertain-license text is returned as metadata and locators without passage content. MCP does not improve source discovery or acquisition.
+
+From `backend/`, install the optional extra and run the API bound to loopback:
+
+```powershell
+uv sync --locked --extra dev --extra mcp
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+In another terminal from `backend/`, start the MCP stdio process:
+
+```powershell
+uv run --locked --extra mcp python -m app.mcp_evidence_server
+```
+
+The process accepts only a loopback IP API origin and disables redirects and ambient proxy settings. For opted-in local development auth, it creates a short-lived local token using the same backend settings loaded from the ignored repository `.env`; do not place provider secrets or session tokens in source control or shared client configuration. For any managed-auth setup, inject the user's bearer token through a local secret manager or protected process environment as `VEDA_MCP_BEARER_TOKEN`. This local stdio server is not directly reachable by cloud-hosted ChatGPT custom connectors; remote hosting and OAuth are not implemented. Protocol tests use the official Python SDK client and a loopback fixture, not Claude, ChatGPT, or another hosted model. See [ADR-0054](docs/architecture/ADR-0054-optional-read-only-mcp-evidence-access.md) for the security and architecture boundary.
+
 ## Deployment
 
 Local deployment preparation is recorded in [`docs/deployment/render.md`](docs/deployment/render.md), with a root `render.yaml` that describes a free API and a static frontend and creates no database. Both services disable automatic deploys and require operator-supplied API/auth URLs; neither the Blueprint nor container has been validated by Render or Docker, and no external service has been provisioned. Persistent use requires a separately managed PostgreSQL database, configured Supabase auth, HTTPS frontend/API origins, and a verified backup/restore drill. The operator procedure for PostgreSQL export and isolated restore is [docs/deployment/backup-restore.md](docs/deployment/backup-restore.md); it has not been run because no PostgreSQL service or credentials are available.

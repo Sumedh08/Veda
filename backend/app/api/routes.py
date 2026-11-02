@@ -12,7 +12,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session, selectinload
@@ -65,6 +65,7 @@ from app.research.workflow import (
 from app.schemas import (
     AdvanceRequest,
     EventPageOut,
+    EvidenceSearchRequest,
     JobCreate,
     JobOut,
     MessageCreate,
@@ -2795,6 +2796,70 @@ def get_job_sources(
     }
 
 
+@router.post("/evidence/search")
+def search_evidence(
+    payload: EvidenceSearchRequest,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Search a bounded set of the caller's saved source metadata and passages."""
+    terms = list(
+        dict.fromkeys(re.findall(r"[\w-]{2,}", payload.query.casefold(), flags=re.UNICODE))
+    )[:8]
+    if not terms:
+        raise HTTPException(status_code=422, detail="Search query must contain searchable terms")
+
+    source_matches = []
+    passage_matches = []
+    for term in terms:
+        pattern = f"%{term}%"
+        source_matches.extend(
+            [
+                Source.title.ilike(pattern),
+                Source.publisher.ilike(pattern),
+                Source.doi.ilike(pattern),
+            ]
+        )
+        passage_matches.append(Passage.content.ilike(pattern))
+
+    matching_source_ids = list(
+        db.scalars(
+            select(Source.id)
+            .join(ResearchJob, ResearchJob.id == Source.job_id)
+            .join(Project, Project.id == ResearchJob.project_id)
+            .outerjoin(Passage, Passage.source_id == Source.id)
+            .where(
+                Project.owner_id == user.id,
+                or_(*source_matches, *passage_matches),
+            )
+            .group_by(Source.id, ResearchJob.updated_at, Source.created_at)
+            .order_by(ResearchJob.updated_at.desc(), Source.created_at.desc(), Source.id)
+            .limit(payload.limit)
+        )
+    )
+    items = []
+    for source_id in matching_source_ids:
+        source = _owned_source(db, source_id, user)
+        passages = list(
+            db.scalars(
+                select(Passage)
+                .where(
+                    Passage.source_id == source.id,
+                    or_(*passage_matches),
+                )
+                .order_by(Passage.ordinal, Passage.id)
+                .limit(2)
+            )
+        )
+        items.append(
+            {
+                "source": _source_out(source),
+                "passages": [_passage_out(passage) for passage in passages],
+            }
+        )
+    return {"items": items, "limit": payload.limit}
+
+
 @router.get("/research-jobs/{job_id}/candidates")
 def get_job_candidates(
     job_id: str,
@@ -2983,6 +3048,41 @@ def get_source(
         db.scalars(select(Passage).where(Passage.source_id == source.id).order_by(Passage.ordinal))
     )
     return {**_source_out(source), "passages": [_passage_out(passage) for passage in passages]}
+
+
+@router.get("/sources/{source_id}/provenance")
+def get_source_provenance(
+    source_id: str,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Return bounded source and passage locator metadata without passage bodies."""
+    source = _owned_source(db, source_id, user)
+    passage_columns = (
+        Passage.id,
+        Passage.document_id,
+        Passage.locator,
+        Passage.content_hash,
+        Passage.access_level,
+        Passage.truncated,
+    )
+    passages = list(
+        db.execute(
+            select(*passage_columns)
+            .where(Passage.source_id == source.id)
+            .order_by(Passage.ordinal, Passage.id)
+            .limit(51)
+        ).mappings()
+    )
+    passage_count = (
+        db.scalar(select(func.count(Passage.id)).where(Passage.source_id == source.id)) or 0
+    )
+    return {
+        "source": _source_out(source),
+        "passages": [dict(passage) for passage in passages[:50]],
+        "total_passages": passage_count,
+        "has_more": passage_count > 50,
+    }
 
 
 @router.get("/passages/{passage_id}")

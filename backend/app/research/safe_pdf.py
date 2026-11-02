@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -23,7 +24,7 @@ from urllib.parse import urljoin
 from pypdf import PdfReader, apply_configuration
 from pypdf.errors import LimitReachedError, PdfReadError
 
-from app.research.grobid import GrobidClient, grobid_fallback_error
+from app.research.grobid import MAX_GROBID_PDF_BYTES, GrobidClient, grobid_fallback_error
 from app.research.rights_policy import RightsDecision
 from app.research.safe_fetch import (
     MAX_REDIRECTS,
@@ -35,7 +36,10 @@ from app.research.safe_fetch import (
 )
 from app.research.structured_documents import StructuredDocument
 
-MAX_PDF_BYTES = 8_000_000
+# The prior 8 MB ceiling excluded a preserved institutional PDF lead estimated
+# at ~25.7 MB. This remains a hard per-document bound; parsing limits below are
+# unchanged, and large bodies are streamed to short-lived storage.
+MAX_PDF_BYTES = 32_000_000
 MAX_PDF_PAGE_TREE_ENTRIES = 500
 MAX_PDF_PAGES = 40
 MAX_PDF_PAGE_TEXT_CHARACTERS = 4_000
@@ -191,7 +195,83 @@ class SafePDFFetcher(SafeHTMLFetcher):
                         ) from None
 
                 try:
-                    body = self._read_body(response, sock, deadline)
+                    temp_directory = tempfile.TemporaryDirectory(prefix="veda-pdf-")
+                except OSError:
+                    raise SafeFetchError(
+                        "temporary_storage_unavailable",
+                        "Temporary storage for safe PDF processing is unavailable.",
+                    ) from None
+                try:
+                    with temp_directory as temp_dir:
+                        pdf_path = Path(temp_dir) / "source.pdf"
+                        document_sha256, document_size = self._stream_pdf_to_file(
+                            response, sock, deadline, pdf_path
+                        )
+                        parser_timeout = min(
+                            MAX_PDF_PARSER_SECONDS,
+                            max(0.0, deadline - time.monotonic()),
+                        )
+                        if parser_timeout <= 0:
+                            raise SafeFetchError(
+                                "timeout", "Source retrieval exceeded the time limit."
+                            )
+                        grobid_error = None
+                        if self.grobid_client is not None:
+                            if document_size > MAX_GROBID_PDF_BYTES:
+                                grobid_error = "grobid_input_size_limit"
+                            else:
+                                try:
+                                    grobid_result = self.grobid_client.parse_pdf(
+                                        pdf_path.read_bytes(), timeout_seconds=parser_timeout
+                                    )
+                                except Exception as exc:
+                                    grobid_error = grobid_fallback_error(exc)
+                                else:
+                                    return SafePDFDocument(
+                                        pages=(),
+                                        page_count=None,
+                                        pages_extracted=0,
+                                        text_truncated=bool(
+                                            grobid_result.structured_document.extraction_warnings
+                                        ),
+                                        sha256=document_sha256,
+                                        media_type=media_type,
+                                        final_host=target.host,
+                                        retrieved_at=datetime.now(UTC),
+                                        host_policy_id=host_policy.policy_id,
+                                        host_terms_url=host_policy.terms_url,
+                                        robots_status=robots_status,
+                                        robots_http_status=robots_policy.http_status_code,
+                                        structured_document=grobid_result.structured_document,
+                                        parser_name=grobid_result.parser_name,
+                                        parser_version=grobid_result.parser_version,
+                                    )
+                                parser_timeout = max(0.0, deadline - time.monotonic())
+                                if parser_timeout <= 0:
+                                    raise SafeFetchError(
+                                        "pdf_parser_timeout",
+                                        "PDF text extraction exceeded its time limit.",
+                                    )
+                        pages, page_count, text_truncated = extract_pdf_pages_from_file(
+                            pdf_path, timeout_seconds=parser_timeout
+                        )
+                        return SafePDFDocument(
+                            pages=pages,
+                            page_count=page_count,
+                            pages_extracted=len(pages),
+                            text_truncated=text_truncated,
+                            sha256=document_sha256,
+                            media_type=media_type,
+                            final_host=target.host,
+                            retrieved_at=datetime.now(UTC),
+                            host_policy_id=host_policy.policy_id,
+                            host_terms_url=host_policy.terms_url,
+                            robots_status=robots_status,
+                            robots_http_status=robots_policy.http_status_code,
+                            parser_name="pypdf",
+                            parser_version=PYPDF_VERSION,
+                            grobid_fallback_error=grobid_error,
+                        )
                 except TimeoutError:
                     raise SafeFetchError(
                         "timeout", "Source retrieval exceeded the time limit."
@@ -204,73 +284,73 @@ class SafePDFFetcher(SafeHTMLFetcher):
                     raise SafeFetchError(
                         "network_error", "The public source returned a malformed response."
                     ) from None
-                if b"%PDF-" not in body[:1024]:
-                    raise SafeFetchError(
-                        "invalid_pdf_signature", "The source does not contain a valid PDF header."
-                    )
-                parser_timeout = min(
-                    MAX_PDF_PARSER_SECONDS,
-                    max(0.0, deadline - time.monotonic()),
-                )
-                if parser_timeout <= 0:
-                    raise SafeFetchError("timeout", "Source retrieval exceeded the time limit.")
-                grobid_error = None
-                if self.grobid_client is not None:
-                    try:
-                        grobid_result = self.grobid_client.parse_pdf(
-                            body, timeout_seconds=parser_timeout
-                        )
-                    except Exception as exc:
-                        grobid_error = grobid_fallback_error(exc)
-                    else:
-                        return SafePDFDocument(
-                            pages=(),
-                            page_count=None,
-                            pages_extracted=0,
-                            text_truncated=bool(
-                                grobid_result.structured_document.extraction_warnings
-                            ),
-                            sha256=hashlib.sha256(body).hexdigest(),
-                            media_type=media_type,
-                            final_host=target.host,
-                            retrieved_at=datetime.now(UTC),
-                            host_policy_id=host_policy.policy_id,
-                            host_terms_url=host_policy.terms_url,
-                            robots_status=robots_status,
-                            robots_http_status=robots_policy.http_status_code,
-                            structured_document=grobid_result.structured_document,
-                            parser_name=grobid_result.parser_name,
-                            parser_version=grobid_result.parser_version,
-                        )
-                    parser_timeout = max(0.0, deadline - time.monotonic())
-                    if parser_timeout <= 0:
-                        raise SafeFetchError(
-                            "pdf_parser_timeout", "PDF text extraction exceeded its time limit."
-                        )
-                pages, page_count, text_truncated = extract_pdf_pages(
-                    body, timeout_seconds=parser_timeout
-                )
-                return SafePDFDocument(
-                    pages=pages,
-                    page_count=page_count,
-                    pages_extracted=len(pages),
-                    text_truncated=text_truncated,
-                    sha256=hashlib.sha256(body).hexdigest(),
-                    media_type=media_type,
-                    final_host=target.host,
-                    retrieved_at=datetime.now(UTC),
-                    host_policy_id=host_policy.policy_id,
-                    host_terms_url=host_policy.terms_url,
-                    robots_status=robots_status,
-                    robots_http_status=robots_policy.http_status_code,
-                    parser_name="pypdf",
-                    parser_version=PYPDF_VERSION,
-                    grobid_fallback_error=grobid_error,
-                )
             finally:
                 response.close()
                 sock.close()
         raise SafeFetchError("redirect_limit", "The source exceeded the redirect limit.")
+
+    def _stream_pdf_to_file(
+        self,
+        response: http.client.HTTPResponse,
+        sock,
+        deadline: float,
+        path: Path,
+    ) -> tuple[str, int]:
+        digest = hashlib.sha256()
+        signature = bytearray()
+        total = 0
+        try:
+            output = path.open("xb")
+        except OSError:
+            raise SafeFetchError(
+                "temporary_storage_unavailable",
+                "Temporary storage for safe PDF processing is unavailable.",
+            ) from None
+        try:
+            with output:
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError
+                    try:
+                        sock.settimeout(remaining)
+                        chunk = response.read(min(64_000, self.max_bytes - total + 1))
+                    except TimeoutError:
+                        raise
+                    except (OSError, http.client.HTTPException):
+                        raise SafeFetchError(
+                            "network_error", "The public source could not be retrieved safely."
+                        ) from None
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > self.max_bytes:
+                        raise SafeFetchError(
+                            "response_too_large", "The PDF exceeds the byte limit."
+                        )
+                    if len(signature) < 1024:
+                        signature.extend(chunk[: 1024 - len(signature)])
+                    digest.update(chunk)
+                    try:
+                        output.write(chunk)
+                    except OSError:
+                        raise SafeFetchError(
+                            "temporary_storage_unavailable",
+                            "Temporary storage for safe PDF processing is unavailable.",
+                        ) from None
+        except SafeFetchError:
+            raise
+        except OSError:
+            # This catches buffered flush/close errors after successful writes.
+            raise SafeFetchError(
+                "temporary_storage_unavailable",
+                "Temporary storage for safe PDF processing is unavailable.",
+            ) from None
+        if b"%PDF-" not in signature:
+            raise SafeFetchError(
+                "invalid_pdf_signature", "The source does not contain a valid PDF header."
+            )
+        return digest.hexdigest(), total
 
 
 def extract_pdf_pages(
@@ -279,6 +359,43 @@ def extract_pdf_pages(
     """Extract text in a short-lived worker with parser and wall-clock limits."""
     if len(data) > MAX_PDF_BYTES:
         raise SafeFetchError("response_too_large", "The PDF exceeds the byte limit.")
+    process = _run_pdf_worker(input_data=data, timeout_seconds=timeout_seconds)
+    return _validated_pdf_worker_result(process)
+
+
+def extract_pdf_pages_from_file(
+    path: str | Path, *, timeout_seconds: float = MAX_PDF_PARSER_SECONDS
+) -> tuple[tuple[tuple[int, str], ...], int, bool]:
+    """Parse a bounded temporary PDF by path without duplicating it in the parent process."""
+    pdf_path = Path(path)
+    try:
+        size = pdf_path.stat().st_size
+        if not pdf_path.is_file() or size <= 0 or size > MAX_PDF_BYTES:
+            raise SafeFetchError("response_too_large", "The PDF exceeds the byte limit.")
+        with pdf_path.open("rb") as pdf_file:
+            signature = pdf_file.read(1024)
+        if b"%PDF-" not in signature:
+            raise SafeFetchError(
+                "invalid_pdf_signature", "The source does not contain a valid PDF header."
+            )
+    except SafeFetchError:
+        raise
+    except OSError:
+        raise SafeFetchError(
+            "pdf_input_unavailable", "The temporary PDF could not be read safely."
+        ) from None
+    process = _run_pdf_worker(input_path=pdf_path, timeout_seconds=timeout_seconds)
+    return _validated_pdf_worker_result(process)
+
+
+def _run_pdf_worker(
+    *,
+    timeout_seconds: float,
+    input_data: bytes | None = None,
+    input_path: Path | None = None,
+) -> subprocess.CompletedProcess:
+    if (input_data is None) == (input_path is None):
+        raise ValueError("exactly one PDF worker input is required")
     environment = {
         name: os.environ[name]
         for name in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP")
@@ -286,10 +403,13 @@ def extract_pdf_pages(
     }
     environment["PYTHONUTF8"] = "1"
     environment["PYTHONPATH"] = os.pathsep.join(entry for entry in sys.path if entry)
+    command = [sys.executable, "-m", "app.research.pdf_worker"]
+    if input_path is not None:
+        command.extend(("--input-file", str(input_path.resolve())))
     try:
         process = subprocess.run(
-            [sys.executable, "-m", "app.research.pdf_worker"],
-            input=data,
+            command,
+            input=input_data,
             capture_output=True,
             cwd=Path(__file__).resolve().parents[2],
             env=environment,
@@ -304,7 +424,12 @@ def extract_pdf_pages(
         raise SafeFetchError(
             "pdf_parser_unavailable", "PDF text extraction could not be started."
         ) from None
+    return process
 
+
+def _validated_pdf_worker_result(
+    process: subprocess.CompletedProcess,
+) -> tuple[tuple[tuple[int, str], ...], int, bool]:
     try:
         result = json.loads(process.stdout)
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -363,6 +488,34 @@ def extract_pdf_pages(
 
 def extract_pdf_pages_in_worker(data: bytes) -> tuple[tuple[tuple[int, str], ...], int, bool]:
     """Worker entry point; never pass through the subprocess wrapper."""
+    return _extract_pdf_pages_from_stream(BytesIO(data))
+
+
+def extract_pdf_pages_from_file_in_worker(
+    path: str | Path,
+) -> tuple[tuple[tuple[int, str], ...], int, bool]:
+    """Worker entry point for a parent-created bounded temporary PDF file."""
+    pdf_path = Path(path)
+    try:
+        size = pdf_path.stat().st_size
+        if not pdf_path.is_file() or size <= 0 or size > MAX_PDF_BYTES:
+            raise SafeFetchError("response_too_large", "The PDF exceeds the byte limit.")
+        with pdf_path.open("rb") as stream:
+            if b"%PDF-" not in stream.read(1024):
+                raise SafeFetchError(
+                    "invalid_pdf_signature", "The source does not contain a valid PDF header."
+                )
+            stream.seek(0)
+            return _extract_pdf_pages_from_stream(stream)
+    except SafeFetchError:
+        raise
+    except OSError:
+        raise SafeFetchError(
+            "pdf_input_unavailable", "The temporary PDF could not be read safely."
+        ) from None
+
+
+def _extract_pdf_pages_from_stream(stream) -> tuple[tuple[tuple[int, str], ...], int, bool]:
     try:
         with apply_configuration(
             maximum_declared_stream_length=MAX_PDF_STREAM_BYTES,
@@ -394,7 +547,7 @@ def extract_pdf_pages_in_worker(data: bytes) -> tuple[tuple[tuple[int, str], ...
             disable_legacy_handling=True,
         ):
             reader = PdfReader(
-                BytesIO(data),
+                stream,
                 strict=True,
                 root_object_recovery_limit=2_000,
                 xref_stream_maximum_entries=50_000,

@@ -22,6 +22,20 @@ class ProjectCreate(BaseModel):
         return value.strip()
 
 
+class EvidenceSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=2, max_length=300)
+    limit: int = Field(default=5, ge=1, le=8)
+
+    @field_validator("query")
+    @classmethod
+    def strip_query(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Search query cannot be blank")
+        return value.strip()
+
+
 class ProjectPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=4000)

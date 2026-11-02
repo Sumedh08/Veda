@@ -2168,5 +2168,34 @@
     "status": "DONE",
     "verification": "2026-11-02: backend pytest collected 874 and exited 0: 872 passed / 2 PostgreSQL-only skipped; changed-file Ruff check/format passed; Vitest 23/23, production build, serial Playwright 52 passed / 19 opt-in skipped, isolated SQLite migration round-trip/schema check, and backlog/evaluation/annotation/benchmark/research-audit validators passed. Tests cover question profiles, no-content abstention, source/work/version grouping, unknown and overlapping independence, per-requirement corroboration, source-class coverage, persistence/report status and browser compatibility. The frozen v3 pre-repair association miss is preserved; generic inflected relation and tracking/alignment cues now trigger association appraisal. V4 was frozen before the repair but used diagnostically for the remaining tracking cue, so no untouched holdout is claimed. Read-only replay of four historical reports found 69 discovery candidates, 27 selected source records, 5 retrieved documents, 14 passages, 10 claims and 8 reports; all predate this policy, and only one academic source yielded full text. No live provider or model call; no scientific-quality score.",
     "next_action": "Obtain reviewed investigation/dataset provenance before marking independence. Keep T-140/B-017 open for live nonacademic source-to-passage evidence and B-010 open for independent scientific-quality review. Freeze a new untouched transferability set before a future change to the planner classifier; do not interpret the v3/v4 planner-only checks as retrieval validation."
+  },
+  {
+    "id": "T-142",
+    "task": "Raise bounded PDF acquisition capacity without weakening parser safeguards",
+    "depends_on": [
+      "T-130"
+    ],
+    "priority": "P1",
+    "owner": "Codex",
+    "effort": "M",
+    "acceptance": "Eligible PDFs can be streamed into short-lived storage under a configurable hard byte bound and parsed in an isolated worker without a second whole-file copy; existing page/text/time/parser limits remain visible; partial extraction is reported as truncated; temporary resources are removed on success and failure; storage, transport, rights, and parser failures remain distinct.",
+    "status": "DONE",
+    "verification": "2026-11-02: PDF hard cap is 32,000,000 bytes, replacing 8,000,000; downloader streams in bounded chunks to a temporary file, hashes while streaming, and passes the path to the isolated parser subprocess. Parser caps remain 40/500 page-tree entries, 4,000 characters/page, 60,000 total text characters, 1 MB decoded streams, 12 MB decode work, 30-second parser and 45-second total limits; truncation remains explicit. Synthetic 25.7 MB/42-page parser benchmark returned 40 pages and truncation in ~9.1 seconds; sampled worker peak working set was ~4.35 MiB and parent peak delta ~1.67 MiB. This is a padded synthetic file and measures parser path only, not real network acquisition or actual publication quality. Offline tests cover 8.1 MB streamed input, cap enforcement without Content-Length, temp cleanup, 42-page partial coverage and storage close-error classification. No real institutional PDF was eligible or fetched, so T-140 remains open.",
+    "next_action": "Use this larger bound only within existing source-specific rights and network gates. Reassess using permitted real documents and deployment hardware before increasing the cap or page/time budgets. Do not describe the synthetic parser benchmark as a live acquisition result."
+  },
+  {
+    "id": "T-143",
+    "task": "Prototype an optional read-only MCP interface over Veda's owner-scoped evidence API",
+    "depends_on": [
+      "T-130",
+      "T-141"
+    ],
+    "priority": "P2",
+    "owner": "Codex",
+    "effort": "S",
+    "acceptance": "A local read-only MCP server can search saved sources, return bounded provenance, and retrieve a source-linked passage without direct database access or raw-document retrieval; authentication and ownership remain enforced by Veda's API; private-research-only or uncertainly licensed text is not sent to an external client; standard SDK protocol can list and call tools.",
+    "status": "DONE",
+    "verification": "2026-11-02: Optional `mcp==2.3.0` extra adds no base runtime dependency. A read-only stdio server and owner-scoped POST evidence search API expose bounded search, source provenance, and passage lookup; external text requires explicit item-level CC-BY 4.0 or CC0 sharing evidence and complete passage/document hashes. In-memory official SDK client and stdio transport tests passed using a loopback-only fake API; tests confirm licensed passage locator/hash and withholding of private-only and unverified-license text. This is protocol-only fixture evidence; Claude, ChatGPT and other hosted clients were not connected. MCP does not improve acquisition or research quality and remote ChatGPT use would need a separately hosted/authenticated MCP endpoint. No durable MCP-specific audit table or database migration was added.",
+    "next_action": "Keep MCP optional. Before client deployment or remote hosting, add a client-specific authentication review and durable audit requirements if needed; never expose private-research-only passages through this boundary. Continue standalone Veda research and use this server only to inspect evidence that satisfies the narrower sharing gate."
   }
 ]

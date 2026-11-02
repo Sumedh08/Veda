@@ -3,6 +3,7 @@ import socket
 import subprocess
 from datetime import date
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -219,13 +220,14 @@ def test_default_pdf_fetch_limit_uses_pdf_cap_not_html_default(monkeypatch):
             licenses=frozenset({license_code}),
         )
 
-    parsed_sizes = []
+    parsed_paths = []
 
-    def parse_pdf(data, *, timeout_seconds):
-        parsed_sizes.append(len(data))
+    def parse_pdf(path, *, timeout_seconds):
+        parsed_paths.append(Path(path))
+        assert Path(path).stat().st_size == body_size
         return ((1, "A permitted research passage."),), 1, False
 
-    monkeypatch.setattr(safe_pdf, "extract_pdf_pages", parse_pdf)
+    monkeypatch.setattr(safe_pdf, "extract_pdf_pages_from_file", parse_pdf)
     fetcher = SafePDFFetcher(
         resolver=lambda *args: [_record("93.184.216.34")],
         connector=connect,
@@ -237,7 +239,163 @@ def test_default_pdf_fetch_limit_uses_pdf_cap_not_html_default(monkeypatch):
 
     assert MAX_PDF_BYTES > body_size > 2_000_000
     assert document.pages == ((1, "A permitted research passage."),)
-    assert parsed_sizes == [body_size]
+    assert len(parsed_paths) == 1
+    assert not parsed_paths[0].exists()
+
+
+def test_large_pdf_download_streams_to_ephemeral_file_and_cleans_up(monkeypatch):
+    import hashlib
+
+    from app.research import safe_pdf
+
+    body_size = 8_100_000
+    prefix = _pdf(["A substantive institutional finding with a stable page locator."])
+    body = prefix + b" " * (body_size - len(prefix))
+    assert safe_pdf.MAX_PDF_BYTES >= 25_000_000
+
+    source = FakeSocket(
+        _response(
+            200,
+            body,
+            f"Content-Type: application/pdf\r\nContent-Length: {len(body)}\r\n",
+        )
+    )
+    observed_paths = []
+
+    def parse_file(path, *, timeout_seconds):
+        document_path = Path(path)
+        observed_paths.append(document_path)
+        assert document_path.stat().st_size == body_size
+        assert document_path.read_bytes()[:8] == b"%PDF-1.4"
+        return (
+            ((1, "A substantive institutional finding with a stable page locator."),),
+            1,
+            False,
+        )
+
+    monkeypatch.setattr(safe_pdf, "extract_pdf_pages_from_file", parse_file, raising=False)
+    fetcher, _calls = _fetcher(
+        lambda *args: [_record("93.184.216.34")],
+        [source],
+        max_bytes=safe_pdf.MAX_PDF_BYTES,
+    )
+
+    document = fetcher.fetch_pdf("https://papers.example/report.pdf", license_name="cc-by")
+
+    assert document.pages == (
+        (1, "A substantive institutional finding with a stable page locator."),
+    )
+    assert document.sha256 == hashlib.sha256(body).hexdigest()
+    assert len(observed_paths) == 1
+    assert not observed_paths[0].exists()
+
+
+def test_file_parser_extracts_large_pdf_without_claiming_complete_page_coverage(tmp_path):
+    from app.research.safe_pdf import extract_pdf_pages_from_file
+
+    prefix = _pdf([f"Research evidence appears on page {index}." for index in range(1, 43)])
+    large_pdf = tmp_path / "large-report.pdf"
+    large_pdf.write_bytes(prefix + b" " * (8_100_000 - len(prefix)))
+
+    pages, page_count, truncated = extract_pdf_pages_from_file(large_pdf)
+
+    assert page_count == 42
+    assert len(pages) == MAX_PDF_PAGES
+    assert pages[0] == (1, "Research evidence appears on page 1.")
+    assert truncated is True
+
+
+def test_streaming_pdf_enforces_size_limit_without_content_length(monkeypatch):
+    source = FakeSocket(
+        _response(
+            200,
+            _pdf(["This body must stop at the configured byte cap."]) + b"x" * 200,
+            "Content-Type: application/pdf\r\n",
+        )
+    )
+    fetcher, calls = _fetcher(
+        lambda *args: [_record("93.184.216.34")],
+        [source],
+        max_bytes=128,
+    )
+    monkeypatch.setattr(
+        safe_pdf,
+        "extract_pdf_pages_from_file",
+        lambda *_args, **_kwargs: pytest.fail("Oversized response must not reach the parser"),
+    )
+
+    with pytest.raises(SafeFetchError) as error:
+        fetcher.fetch_pdf("https://papers.example/report.pdf", license_name="cc-by")
+
+    assert error.value.code == "response_too_large"
+    assert len(calls) == 1
+
+
+def test_streamed_pdf_temporary_file_is_removed_when_parser_fails(monkeypatch):
+    source = FakeSocket(
+        _response(
+            200,
+            _pdf(["The parser will fail after temporary acquisition."]),
+            "Content-Type: application/pdf\r\n",
+        )
+    )
+    observed_paths = []
+
+    def fail_parse(path, *, timeout_seconds):
+        observed_paths.append(Path(path))
+        raise SafeFetchError("invalid_pdf", "The PDF could not be safely parsed.")
+
+    monkeypatch.setattr(safe_pdf, "extract_pdf_pages_from_file", fail_parse, raising=False)
+    fetcher, _calls = _fetcher(
+        lambda *args: [_record("93.184.216.34")],
+        [source],
+        max_bytes=safe_pdf.MAX_PDF_BYTES,
+    )
+
+    with pytest.raises(SafeFetchError) as error:
+        fetcher.fetch_pdf("https://papers.example/report.pdf", license_name="cc-by")
+
+    assert error.value.code == "invalid_pdf"
+    assert len(observed_paths) == 1
+    assert not observed_paths[0].exists()
+
+
+def test_streamed_pdf_classifies_temporary_file_close_failure_as_storage_error(monkeypatch):
+    source = FakeSocket(
+        _response(
+            200,
+            _pdf(["The temporary file close will fail after the response is read."]),
+            "Content-Type: application/pdf\r\n",
+        )
+    )
+    original_open = Path.open
+
+    class CloseFailingFile:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            raise OSError("simulated temporary storage close failure")
+
+        def write(self, chunk):
+            return len(chunk)
+
+    def open_path(path, mode="r", *args, **kwargs):
+        if path.name == "source.pdf" and mode == "xb":
+            return CloseFailingFile()
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", open_path)
+    fetcher, _calls = _fetcher(
+        lambda *args: [_record("93.184.216.34")],
+        [source],
+        max_bytes=MAX_PDF_BYTES,
+    )
+
+    with pytest.raises(SafeFetchError) as error:
+        fetcher.fetch_pdf("https://papers.example/report.pdf", license_name="cc-by")
+
+    assert error.value.code == "temporary_storage_unavailable"
 
 
 def test_parser_extracts_text_with_page_and_total_character_caps():

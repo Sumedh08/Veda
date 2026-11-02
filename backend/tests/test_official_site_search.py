@@ -735,6 +735,43 @@ def test_verified_publication_page_rejects_untrusted_canonical_wrong_title_and_p
     assert requested_paths == ["/robots.txt", "/reports/food-security"]
 
 
+def test_publication_verification_attributes_html_redirect_target_to_robots_failure():
+    requested_paths = []
+
+    def handler(request):
+        requested_paths.append(request.url.path)
+        if request.url.path == "/robots.txt":
+            return httpx.Response(
+                302,
+                headers={"location": "https://fao.example/"},
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text="<html><body>Institutional homepage</body></html>",
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    provider = WordPressPublicationSearchProvider(
+        client=client, public_resolver=lambda *_args: ["8.8.8.8"]
+    )
+    try:
+        with pytest.raises(OfficialSitePublicationSearchError) as raised:
+            provider.verify_publication_page(
+                _organization_for_metadata_verification(),
+                "https://fao.example/reports/food-security",
+                expected_title="Food security policy evidence",
+            )
+    finally:
+        provider.close()
+        client.close()
+
+    assert raised.value.code == "robots_invalid_media_type"
+    assert raised.value.request_dispatched is True
+    assert raised.value.requests_attempted == 2
+    assert requested_paths == ["/robots.txt", "/"]
+
+
 def test_verified_ror_official_url_is_usable_when_ror_has_no_domain_field():
     calls = []
 

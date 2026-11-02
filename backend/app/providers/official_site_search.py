@@ -8,6 +8,7 @@ content.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import ipaddress
 import json
@@ -100,6 +101,15 @@ class OfficialPublicationPageMetadata:
     license_url: str | None = None
     license_evidence: str | None = None
     license_status: str = "not_declared"
+    robots_status: str = "not_checked"
+    robots_http_status: int | None = None
+    site_terms_status: str = "not_checked"
+    site_terms_url: str | None = None
+    site_terms_sha256: str | None = None
+    site_terms_restriction_codes: tuple[str, ...] = ()
+    linked_pdf_url: str | None = None
+    item_specific_restriction_codes: tuple[str, ...] = ()
+    copyright_notice_detected: bool = False
 
 
 class _PublicationMetadata(HTMLParser):
@@ -108,6 +118,10 @@ class _PublicationMetadata(HTMLParser):
         self.metadata: dict[str, str] = {}
         self.canonical: str | None = None
         self.license_urls: list[tuple[str, str]] = []
+        self.terms_urls: list[str] = []
+        self.pdf_urls: list[str] = []
+        self._anchor_href: str | None = None
+        self._anchor_text: list[str] = []
         self._in_title = False
         self._title_parts: list[str] = []
 
@@ -115,6 +129,10 @@ class _PublicationMetadata(HTMLParser):
         values = dict(attrs)
         if tag.casefold() == "title":
             self._in_title = True
+        elif tag.casefold() == "a":
+            href = values.get("href")
+            self._anchor_href = href.strip()[:2000] if isinstance(href, str) else None
+            self._anchor_text = []
         elif tag.casefold() == "meta":
             key = (values.get("name") or values.get("property") or "").casefold().strip()
             content = values.get("content")
@@ -133,14 +151,30 @@ class _PublicationMetadata(HTMLParser):
                     self.license_urls.append((href.strip()[:2000], "official_page_rel_license"))
                 if "canonical" in relations and self.canonical is None:
                     self.canonical = href.strip()[:2000]
+                if {"terms-of-service", "terms"} & set(relations):
+                    self.terms_urls.append(href.strip()[:2000])
+                media_type = (values.get("type") or "").casefold().strip()
+                if media_type == "application/pdf" and len(self.pdf_urls) < 16:
+                    self.pdf_urls.append(href.strip()[:2000])
 
     def handle_endtag(self, tag: str) -> None:
         if tag.casefold() == "title":
             self._in_title = False
+        elif tag.casefold() == "a" and self._anchor_href:
+            anchor_text = " ".join(" ".join(self._anchor_text).casefold().split())
+            if any(word in anchor_text for word in ("terms", "copyright", "legal notice")):
+                self.terms_urls.append(self._anchor_href)
+            parsed_href = urlsplit(self._anchor_href)
+            if parsed_href.path.casefold().endswith(".pdf") and len(self.pdf_urls) < 16:
+                self.pdf_urls.append(self._anchor_href)
+            self._anchor_href = None
+            self._anchor_text = []
 
     def handle_data(self, data: str) -> None:
         if self._in_title and len(self._title_parts) < 40:
             self._title_parts.append(data[:300])
+        if self._anchor_href and len(self._anchor_text) < 20:
+            self._anchor_text.append(data[:200])
 
     @property
     def document_title(self) -> str | None:
@@ -171,6 +205,83 @@ class _PublicationMetadata(HTMLParser):
             else "official_page_license_metadata"
         )
         return license_code, license_url, evidence, "recognized_item_license"
+
+
+class _TermsText(HTMLParser):
+    """Collect a bounded text view for deterministic restriction-signal checks."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._ignored_depth = 0
+
+    def handle_starttag(self, tag: str, _attrs: list[tuple[str, str | None]]) -> None:
+        if tag.casefold() in {"script", "style", "svg", "iframe", "template", "noscript"}:
+            self._ignored_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() in {"script", "style", "svg", "iframe", "template", "noscript"}:
+            self._ignored_depth = max(0, self._ignored_depth - 1)
+
+    def handle_data(self, data: str) -> None:
+        if self._ignored_depth == 0 and len(self.parts) < 5000:
+            self.parts.append(data[:500])
+
+
+def _site_terms_restriction_codes(content: bytes) -> tuple[str, ...]:
+    """Return deterministic signals only; this does not interpret legal terms."""
+    parser = _TermsText()
+    parser.feed(content[:64_000].decode("utf-8", errors="replace"))
+    parser.close()
+    text = " ".join(" ".join(parser.parts).casefold().split())
+    patterns = {
+        "automated_access": re.compile(
+            r"\b(?:automated|automatic)\s+(?:access|means|requests|systems|tools|scraping|crawling)\b"
+            r"|\brobots?\s+(?:and|or)\s+other\s+automated\b"
+            r"|\b(?:scraping|crawling)\s+(?:is|are)\s+(?:prohibited|not permitted|not allowed)\b"
+        ),
+        "text_data_mining": re.compile(r"\btext\s+(?:and|&)\s+data\s+mining\b|\bdata\s+mining\b"),
+        "bulk_download": re.compile(
+            r"\bbulk\s+(?:download|downloads|downloading|extraction|harvesting)\b"
+        ),
+        "ai_training": re.compile(
+            r"\b(?:artificial intelligence|machine learning|ai)\s+(?:training|train)\b"
+        ),
+        "reproduction_without_consent": re.compile(
+            r"\b(?:may not|must not|prohibited|not permitted|not allowed)\b"
+            r".{0,100}\b(?:copy|reproduce|reproduction|download|extract)\b"
+        ),
+    }
+    return tuple(code for code, pattern in patterns.items() if pattern.search(text))
+
+
+def _publication_rights_signals(content: bytes) -> tuple[tuple[str, ...], bool]:
+    """Record restrictive item-page signals and copyright-notice presence only.
+
+    Signals trigger review; they do not interpret the notice or override a legal
+    exception. Page text is bounded, parsed for visible text, and discarded.
+    """
+    parser = _TermsText()
+    parser.feed(content[:64_000].decode("utf-8", errors="replace"))
+    parser.close()
+    text = " ".join(" ".join(parser.parts).casefold().split())
+    restriction_patterns = {
+        "item_specific_reproduction_restriction": re.compile(
+            r"\bno part of .{0,140}\bmay be reproduced\b"
+            r"|\breproduction\b.{0,120}\b(?:prohibited|not permitted|not allowed|requires? written permission)\b"
+            r"|\b(?:may not|must not|shall not|not permitted|not allowed|prohibited)\b"
+            r".{0,120}\b(?:reproduce|copy|redistribute)\b"
+        ),
+        "item_specific_automated_processing_restriction": re.compile(
+            r"\b(?:automated access|text and data mining|machine-readable extraction)\b"
+            r".{0,120}\b(?:prohibited|not permitted|not allowed|requires? permission)\b"
+            r"|\b(?:prohibited|not permitted|not allowed)\b.{0,120}"
+            r"\b(?:automated access|text and data mining|machine-readable extraction)\b"
+        ),
+    }
+    codes = tuple(code for code, pattern in restriction_patterns.items() if pattern.search(text))
+    copyright_notice = bool(re.search(r"\b(?:copyright|all rights reserved)\b|©|\(c\)", text))
+    return codes, copyright_notice
 
 
 def _publication_titles_match(actual: str, expected: str) -> bool:
@@ -399,8 +510,8 @@ class WordPressPublicationSearchProvider:
         maximum: int,
         expected: str,
         verified_domains: list[str],
-        allow_not_found: bool = False,
-    ) -> tuple[bytes, int]:
+        allow_http_4xx: bool = False,
+    ) -> tuple[bytes, int, int]:
         safe = _safe_https_url(url)
         if safe is None:
             raise OfficialSitePublicationSearchError("invalid_official_site_url")
@@ -483,8 +594,8 @@ class WordPressPublicationSearchProvider:
                         raise OfficialSitePublicationSearchError(
                             "rate_limited", request_dispatched=True
                         )
-                    if response.status_code == 404 and allow_not_found:
-                        return b"", requests_attempted
+                    if 400 <= response.status_code <= 499 and allow_http_4xx:
+                        return b"", requests_attempted, response.status_code
                     if response.status_code != 200:
                         if response.status_code == 401:
                             code = "authentication_required"
@@ -534,7 +645,7 @@ class WordPressPublicationSearchProvider:
                             raise OfficialSitePublicationSearchError(
                                 "response_too_large", request_dispatched=True
                             )
-                    return bytes(body), requests_attempted
+                    return bytes(body), requests_attempted, response.status_code
             except OfficialSitePublicationSearchError as exc:
                 exc.request_dispatched = requests_attempted > 0
                 exc.requests_attempted = requests_attempted
@@ -580,14 +691,15 @@ class WordPressPublicationSearchProvider:
         if not _host_is_in_verified_domain(host, domains) or parsed.path in {"", "/"}:
             raise OfficialSitePublicationSearchError("unverified_publication_host")
 
-        robots_body, robots_requests = self._get(
+        robots_body, robots_requests, robots_http_status = self._get(
             f"https://{host}/robots.txt",
             params=None,
             maximum=64_000,
             expected="text/plain",
             verified_domains=domains,
-            allow_not_found=True,
+            allow_http_4xx=True,
         )
+        robots = None
         if robots_body:
             robots = RobotFileParser()
             robots.set_url(f"https://{host}/robots.txt")
@@ -602,13 +714,17 @@ class WordPressPublicationSearchProvider:
                     "robots_disallowed", request_dispatched=True
                 )
 
-        body, page_requests = self._get(
-            safe_url,
-            params=None,
-            maximum=MAX_HOME_PAGE_BYTES,
-            expected="text/html",
-            verified_domains=domains,
-        )
+        try:
+            body, page_requests, _page_status = self._get(
+                safe_url,
+                params=None,
+                maximum=MAX_HOME_PAGE_BYTES,
+                expected="text/html",
+                verified_domains=domains,
+            )
+        except OfficialSitePublicationSearchError as exc:
+            exc.requests_attempted += robots_requests
+            raise
         try:
             parser = _PublicationMetadata()
             parser.feed(body.decode("utf-8", errors="replace"))
@@ -657,6 +773,80 @@ class WordPressPublicationSearchProvider:
                 "page_title_metadata_mismatch", request_dispatched=True
             )
         license_code, license_url, license_evidence, license_status = parser.reuse_license()
+        item_specific_restriction_codes, copyright_notice_detected = _publication_rights_signals(
+            body
+        )
+        linked_pdf_url = None
+        for raw_pdf_url in parser.pdf_urls:
+            candidate_pdf_url = _safe_https_url(urljoin(safe_url, raw_pdf_url))
+            if candidate_pdf_url is None:
+                continue
+            candidate_pdf_host = (urlsplit(candidate_pdf_url).hostname or "").casefold()
+            if _host_is_in_verified_domain(candidate_pdf_host, domains):
+                linked_pdf_url = candidate_pdf_url
+                break
+        site_terms_status = "not_checked"
+        site_terms_url: str | None = None
+        site_terms_sha256: str | None = None
+        site_terms_restriction_codes: tuple[str, ...] = ()
+        terms_requests = 0
+        if license_status == "not_declared":
+            candidate_terms_urls: list[str] = []
+            for raw_url in parser.terms_urls[:16]:
+                normalized = _safe_https_url(urljoin(safe_url, raw_url))
+                if normalized is None:
+                    continue
+                terms_host = (urlsplit(normalized).hostname or "").casefold()
+                if terms_host != host or not _host_is_in_verified_domain(terms_host, domains):
+                    continue
+                if normalized not in candidate_terms_urls:
+                    candidate_terms_urls.append(normalized)
+            origin = f"https://{host}"
+            for path in ("/terms-of-use", "/terms"):
+                fallback = _safe_https_url(origin + path)
+                if fallback and fallback not in candidate_terms_urls:
+                    candidate_terms_urls.append(fallback)
+            found_terms_page = False
+            for candidate_terms_url in candidate_terms_urls[:2]:
+                if robots is not None and not robots.can_fetch("VedaResearch", candidate_terms_url):
+                    site_terms_status = "robots_disallowed"
+                    continue
+                try:
+                    terms_body, attempted, terms_http_status = self._get(
+                        candidate_terms_url,
+                        params=None,
+                        maximum=64_000,
+                        expected="text/html",
+                        verified_domains=domains,
+                        allow_http_4xx=True,
+                    )
+                except OfficialSitePublicationSearchError:
+                    site_terms_status = "unavailable"
+                    terms_requests += 1
+                    break
+                terms_requests += attempted
+                if terms_http_status == 404:
+                    site_terms_status = "not_found"
+                    continue
+                if terms_http_status >= 400:
+                    site_terms_status = "unavailable"
+                    break
+                site_terms_url = candidate_terms_url
+                site_terms_sha256 = hashlib.sha256(terms_body).hexdigest()
+                site_terms_restriction_codes = _site_terms_restriction_codes(terms_body)
+                site_terms_status = (
+                    "restriction_signal"
+                    if site_terms_restriction_codes
+                    else "checked_no_restriction_signal"
+                )
+                found_terms_page = True
+                break
+            if not found_terms_page and site_terms_status not in {
+                "unavailable",
+                "robots_disallowed",
+            }:
+                site_terms_status = "not_found"
+
         return OfficialPublicationPageMetadata(
             requested_url=safe_url,
             canonical_url=safe_canonical,
@@ -669,11 +859,20 @@ class WordPressPublicationSearchProvider:
             ),
             metadata_kind=metadata_kind,
             retrieved_at=datetime.now(UTC).isoformat(),
-            request_count=robots_requests + page_requests,
+            request_count=robots_requests + page_requests + terms_requests,
             license_code=license_code,
             license_url=license_url,
             license_evidence=license_evidence,
             license_status=license_status,
+            robots_status="rules_checked" if robots is not None else "unavailable_4xx",
+            robots_http_status=robots_http_status,
+            site_terms_status=site_terms_status,
+            site_terms_url=site_terms_url,
+            site_terms_sha256=site_terms_sha256,
+            site_terms_restriction_codes=site_terms_restriction_codes,
+            linked_pdf_url=linked_pdf_url,
+            item_specific_restriction_codes=item_specific_restriction_codes,
+            copyright_notice_detected=copyright_notice_detected,
         )
 
     @staticmethod
@@ -878,7 +1077,7 @@ class WordPressPublicationSearchProvider:
         if not _host_is_in_verified_domain(homepage_host, domains):
             raise OfficialSitePublicationSearchError("unverified_homepage_host")
         try:
-            home_body, requests = self._get(
+            home_body, requests, _home_status = self._get(
                 homepage_url,
                 params=None,
                 maximum=MAX_HOME_PAGE_BYTES,
@@ -908,7 +1107,7 @@ class WordPressPublicationSearchProvider:
         if not _host_is_in_verified_domain(api_host, domains):
             raise OfficialSitePublicationSearchError("unverified_catalog_host")
         try:
-            body, api_requests = self._get(
+            body, api_requests, _api_status = self._get(
                 api_url,
                 params={
                     "search": search_query,

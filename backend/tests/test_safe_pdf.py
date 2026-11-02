@@ -344,9 +344,63 @@ def test_fetch_pins_ip_checks_license_mime_and_file_signature():
     assert document.robots_status == "rules_checked"
 
     unlicensed, unlicensed_calls = _fetcher(lambda *args: pytest.fail("DNS must not run"), [])
-    with pytest.raises(SafeFetchError, match="explicitly permitted"):
+    with pytest.raises(SafeFetchError, match="verified, applicable private-research decision"):
         unlicensed.fetch_pdf("https://papers.example/article.pdf", license_name=None)
     assert not unlicensed_calls
+
+
+def test_unlicensed_pdf_requires_private_research_decision_and_stays_on_verified_domain(
+    monkeypatch,
+):
+    from app.research.rights_policy import RightsContext, evaluate_rights
+
+    body = _pdf(["The report describes a measured policy outcome."])
+    source = FakeSocket(
+        _response(
+            200,
+            body,
+            f"Content-Type: application/pdf\r\nContent-Length: {len(body)}\r\n",
+        )
+    )
+    decision = evaluate_rights(
+        RightsContext(
+            source_identity_verified=True,
+            publicly_accessible=True,
+            document_http_status=200,
+            robots_status="rules_checked",
+            robots_allows=True,
+            site_terms_status="checked_no_restriction_signal",
+            use_mode="private_research",
+            jurisdiction="IN",
+            work_type="institutional_report",
+            verified_domains=("papers.example",),
+            terms_url="https://papers.example/terms",
+        )
+    )
+    monkeypatch.setattr(
+        safe_pdf,
+        "extract_pdf_pages",
+        lambda *_args, **_kwargs: (
+            ((1, "The report describes a measured policy outcome."),),
+            1,
+            False,
+        ),
+    )
+    fetcher, calls = _fetcher(
+        lambda *args: [_record("93.184.216.34")],
+        [source],
+        origin_request_limiter=RecordingOriginLimiter(),
+    )
+
+    document = fetcher.fetch_pdf(
+        "https://papers.example/report.pdf",
+        license_name=None,
+        rights_decision=decision,
+    )
+
+    assert document.pages == ((1, "The report describes a measured policy outcome."),)
+    assert document.host_policy_id == "private-research-v1"
+    assert calls == [("93.184.216.34", 443)]
 
     html, _ = _fetcher(
         lambda *args: [_record("93.184.216.34")],

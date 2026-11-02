@@ -4323,6 +4323,17 @@ def test_doi_less_verified_official_page_requires_item_license_and_exact_host_po
         _official_page_metadata_verified_html_location(
             source_url=page_url,
             organization_evidence=organization,
+            page_metadata_evidence={
+                **page_metadata,
+                "item_specific_restriction_codes": ["item_specific_reproduction_restriction"],
+            },
+        )
+        is None
+    )
+    assert (
+        _official_page_metadata_verified_html_location(
+            source_url=page_url,
+            organization_evidence=organization,
             page_metadata_evidence={**page_metadata, "license_status": "not_declared"},
         )
         is None
@@ -4340,6 +4351,103 @@ def test_doi_less_verified_official_page_requires_item_license_and_exact_host_po
             source_url="https://unreviewed.example/reports/urban-heat",
             organization_evidence=organization,
             page_metadata_evidence=page_metadata,
+        )
+        is None
+    )
+
+
+def test_doi_less_official_page_without_license_uses_configured_private_research_policy():
+    from app.research.workflow import _official_page_metadata_verified_html_location
+
+    page_url = "https://research.example/reports/urban-heat"
+    organization = {
+        "organization_id": "orgid:verified-independent-institute",
+        "identity_status": "VERIFIED_DOMAIN_SPECIALIST",
+        "official_domains": ["research.example"],
+        "official_publication_url": page_url,
+        "publisher_verification": "official_page_metadata_verified",
+    }
+    page = {
+        "page_metadata_verification": "robots_allowed_title_and_canonical_match",
+        "metadata_kind": "citation_metadata",
+        "license_status": "not_declared",
+        "robots_status": "rules_checked",
+        "site_terms": {
+            "site_terms_status": "checked_no_restriction_signal",
+            "site_terms_url": "https://research.example/terms",
+        },
+    }
+
+    result = _official_page_metadata_verified_html_location(
+        source_url=page_url,
+        organization_evidence=organization,
+        page_metadata_evidence=page,
+        use_mode="private_research",
+        jurisdiction="IN",
+    )
+
+    assert result is not None
+    location, decision = result
+    assert location["license"] is None
+    assert decision.analysis == "PERMITTED_WITH_LIMITATIONS"
+    assert decision.retention == "LIMITED_EXCERPTS"
+    assert decision.sharing == "CITATION_ONLY"
+    assert decision.max_retained_passages == 4
+    assert decision.max_retained_verbatim_characters == 1200
+    assert decision.legal_review_required is False
+    assert (
+        _official_page_metadata_verified_html_location(
+            source_url=page_url,
+            organization_evidence=organization,
+            page_metadata_evidence={
+                **page,
+                "item_specific_restriction_codes": ["item_specific_reproduction_restriction"],
+            },
+            use_mode="private_research",
+            jurisdiction="IN",
+        )
+        is None
+    )
+    assert (
+        _official_page_metadata_verified_html_location(
+            source_url=page_url,
+            organization_evidence=organization,
+            page_metadata_evidence={**page, "item_specific_restriction_codes": "unchecked"},
+            use_mode="private_research",
+            jurisdiction="IN",
+        )
+        is None
+    )
+    assert (
+        _official_page_metadata_verified_html_location(
+            source_url=page_url,
+            organization_evidence=organization,
+            page_metadata_evidence={
+                **page,
+                "site_terms": {"site_terms_status": "restriction_signal"},
+            },
+            use_mode="private_research",
+            jurisdiction="IN",
+        )
+        is None
+    )
+    assert (
+        _official_page_metadata_verified_html_location(
+            source_url=page_url,
+            organization_evidence=organization,
+            page_metadata_evidence=page,
+            use_mode="commercial",
+            jurisdiction="IN",
+        )
+        is None
+    )
+    assert (
+        _official_page_metadata_verified_html_location(
+            source_url=page_url,
+            organization_evidence=organization,
+            page_metadata_evidence=page,
+            use_mode="private_research",
+            jurisdiction=None,
         )
         is None
     )
@@ -4545,7 +4653,10 @@ def test_crossref_verified_official_html_enters_persisted_passage_pipeline(clien
     assert report_publication["passage_count"] == 3
 
 
-def test_doi_less_official_page_with_verified_item_license_persists_passages(client, monkeypatch):
+@pytest.mark.parametrize("unlicensed_private", [False, True])
+def test_doi_less_official_page_persists_passages_under_its_rights_profile(
+    client, monkeypatch, unlicensed_private
+):
     from datetime import UTC, datetime
     from hashlib import sha256
 
@@ -4570,8 +4681,8 @@ def test_doi_less_official_page_with_verified_item_license_persists_passages(cli
         def __init__(self, **_kwargs):
             self.timeout_seconds = 8
 
-        def fetch_html(self, url, *, license_name):
-            fetched.append((url, license_name))
+        def fetch_html(self, url, *, license_name, rights_decision=None):
+            fetched.append((url, license_name, rights_decision))
             return SafeHTMLDocument(
                 text=page_text,
                 sha256=sha256(page_text.encode()).hexdigest(),
@@ -4579,23 +4690,32 @@ def test_doi_less_official_page_with_verified_item_license_persists_passages(cli
                 final_host="specialist.example",
                 retrieved_at=datetime.now(UTC),
                 truncated=False,
-                host_policy_id=policy.policy_id,
-                host_terms_url=policy.terms_url,
+                host_policy_id=(
+                    rights_decision.policy_version if rights_decision else policy.policy_id
+                ),
+                host_terms_url=(rights_decision.terms_url if rights_decision else policy.terms_url)
+                or "",
                 robots_status="rules_checked",
             )
 
     monkeypatch.setattr(workflow, "reviewed_host_policy", lambda _host, _license: policy)
     monkeypatch.setattr(workflow, "SafeHTMLFetcher", FixtureHTMLFetcher)
+    if unlicensed_private:
+        monkeypatch.setattr(workflow.settings, "rights_jurisdiction", "IN")
     project = create_project(client)
     job = create_job(
         client,
         project["id"],
-        idempotency_key="official-page-doi-less-licensed-01",
+        idempotency_key=(
+            "official-page-doi-less-private-01"
+            if unlicensed_private
+            else "official-page-doi-less-licensed-01"
+        ),
         question="How do heat hazards and social vulnerability vary across Indian cities?",
     )
     planned = client.post(
         f"/api/v1/research-jobs/{job['id']}/advance",
-        json={"operation_key": "official-page-doi-less-licensed-plan-01"},
+        json={"operation_key": "official-page-doi-less-plan-01"},
     )
     assert planned.status_code == 200, planned.text
     with client.db_sessions() as db:
@@ -4624,15 +4744,32 @@ def test_doi_less_official_page_with_verified_item_license_persists_passages(cli
                                 "official_publication_url": page_url,
                                 "publisher_verification": "official_page_metadata_verified",
                                 "official_page_license": {
-                                    "license_code": "cc-by",
-                                    "license_url": "https://creativecommons.org/licenses/by/4.0/",
-                                    "license_evidence": "official_page_rel_license",
-                                    "license_status": "recognized_item_license",
+                                    "license_code": None if unlicensed_private else "cc-by",
+                                    "license_url": None
+                                    if unlicensed_private
+                                    else "https://creativecommons.org/licenses/by/4.0/",
+                                    "license_evidence": None
+                                    if unlicensed_private
+                                    else "official_page_rel_license",
+                                    "license_status": "not_declared"
+                                    if unlicensed_private
+                                    else "recognized_item_license",
                                 },
                             },
                             "official_site_publication_search": {
                                 "page_metadata_verification": "robots_allowed_title_and_canonical_match",
                                 "metadata_kind": "citation_metadata",
+                                "robots_status": "rules_checked",
+                                "site_terms": {
+                                    "site_terms_status": "checked_no_restriction_signal"
+                                    if unlicensed_private
+                                    else "not_checked",
+                                    "site_terms_url": "https://specialist.example/terms"
+                                    if unlicensed_private
+                                    else None,
+                                    "site_terms_sha256": "a" * 64 if unlicensed_private else None,
+                                    "site_terms_restriction_codes": [],
+                                },
                             },
                         },
                     ),
@@ -4643,7 +4780,7 @@ def test_doi_less_official_page_with_verified_item_license_persists_passages(cli
 
     extracted = client.post(
         f"/api/v1/research-jobs/{job['id']}/advance",
-        json={"operation_key": "official-page-doi-less-licensed-extract-01"},
+        json={"operation_key": "official-page-doi-less-extract-01"},
     )
     assert extracted.status_code == 200, extracted.text
     source = next(
@@ -4654,12 +4791,28 @@ def test_doi_less_official_page_with_verified_item_license_persists_passages(cli
     inspected = client.get(f"/api/v1/sources/{source['id']}").json()
 
     assert extracted.json()["current_stage"] == "appraisal"
-    assert fetched == [(page_url, "cc-by")]
+    assert len(fetched) == 1
+    assert fetched[0][0] == page_url
+    assert (not fetched[0][1]) if unlicensed_private else fetched[0][1] == "cc-by"
     assert source["doi"] is None
     assert source["retrieval_status"] == "full_text_html"
-    assert source["retrieval"]["scope"] == "official_page_item_licensed_verified_publication"
-    assert source["retrieval"]["rights_decision"] == "PERMITTED_WITH_RESTRICTIONS"
-    assert source["retrieval"]["host_policy_id"] == policy.policy_id
+    if unlicensed_private:
+        decision = source["retrieval"]["rights_assessment"]
+        assert source["retrieval"]["scope"] == "official_page_private_research_verified_publication"
+        assert source["retrieval"]["rights_decision"] == "PERMITTED_WITH_LIMITATIONS"
+        assert decision["basis"] == "india_private_research_exception_candidate"
+        assert decision["retention"] == "LIMITED_EXCERPTS"
+        assert decision["sharing"] == "CITATION_ONLY"
+        assert source["retrieval"]["retention_limit_passages"] == 4
+        assert source["retrieval"]["host_policy_id"] == "private-research-v1"
+        assert fetched[0][2] is not None
+        assert sum(len(item["content"]) for item in inspected["passages"]) <= 1200
+        assert len(inspected["passages"]) <= 4
+    else:
+        assert source["retrieval"]["scope"] == "official_page_item_licensed_verified_publication"
+        assert source["retrieval"]["rights_decision"] == "PERMITTED_WITH_RESTRICTIONS"
+        assert source["retrieval"]["host_policy_id"] == policy.policy_id
+        assert fetched[0][2] is None
     assert len(inspected["passages"]) == 3
     assert any(
         "satellite-derived land-surface temperature" in item["content"]
@@ -4667,6 +4820,157 @@ def test_doi_less_official_page_with_verified_item_license_persists_passages(cli
     )
     claims = client.get(f"/api/v1/research-jobs/{job['id']}/claims").json()["items"]
     assert any(claim["source_id"] == source["id"] for claim in claims)
+
+
+def test_private_research_passages_remain_inspectable_but_are_withheld_from_exports(client):
+    project = create_project(client)
+    job = create_job(
+        client,
+        project["id"],
+        idempotency_key="private-research-export-rights-01",
+        question="What methods and results are reported?",
+    )
+    source_text = "The report found that grid flexibility reduced curtailment by 18 percent."
+    with client.db_sessions() as db:
+        source = Source(
+            job_id=job["id"],
+            external_id="institutional-report:private-export",
+            title="Grid Flexibility Study",
+            url="https://institute.example/reports/grid-flexibility",
+            publisher="Independent Energy Institute",
+            source_type="institutional_report",
+            retrieval_status="full_text_html",
+            metadata_json={
+                "retrieval": {
+                    "rights_assessment": {
+                        "analysis": "PERMITTED_WITH_LIMITATIONS",
+                        "retention": "LIMITED_EXCERPTS",
+                        "sharing": "CITATION_ONLY",
+                        "basis": "india_private_research_exception_candidate",
+                    }
+                }
+            },
+        )
+        db.add(source)
+        db.flush()
+        passage = add_test_passage(
+            db,
+            source,
+            ordinal=0,
+            locator="Results, paragraph 2",
+            content=source_text,
+            access_level="full_text_html",
+        )
+        db.flush()
+        claim = Claim(
+            job_id=job["id"],
+            source_id=source.id,
+            passage_id=passage.id,
+            text=source_text,
+            span_start=0,
+            span_end=len(source_text),
+        )
+        report = ResearchReport(
+            job_id=job["id"],
+            status="completed_with_limitations",
+            body_markdown=f"# Evidence map\n\n- {source_text} [S1]",
+            citation_map_json={
+                "S1": {
+                    "source_id": source.id,
+                    "title": source.title,
+                    "url": source.url,
+                    "passages": [passage.id],
+                }
+            },
+            verification_json={"report_schema_version": 1},
+        )
+        db.add_all([claim, report])
+        db.commit()
+        source_id = source.id
+        report_id = report.id
+
+    # The private Veda workspace can inspect its evidence and report.
+    inspected_source = client.get(f"/api/v1/sources/{source_id}")
+    private_report = client.get(f"/api/v1/reports/{report_id}")
+    assert source_text in inspected_source.text
+    assert source_text in private_report.text
+
+    markdown_export = client.get(f"/api/v1/reports/{report_id}/export?format=markdown")
+    json_export = client.get(f"/api/v1/reports/{report_id}/export?format=json")
+    account_export = client.get("/api/v1/me/export")
+    assert markdown_export.status_code == 200
+    assert json_export.status_code == 200
+    assert account_export.status_code == 200
+    assert source_text not in markdown_export.text
+    assert source_text not in json_export.text
+    assert source_text not in account_export.text
+    assert "citation-only" in markdown_export.text
+    assert "grid-flexibility" in markdown_export.text
+
+
+def test_unreferenced_citation_only_source_does_not_withhold_report_export(client):
+    project = create_project(client)
+    job = create_job(
+        client,
+        project["id"],
+        idempotency_key="private-research-export-unreferenced-01",
+        question="What does the report say about grid planning?",
+    )
+    report_text = "The report compares two independently licensed grid-planning studies."
+    with client.db_sessions() as db:
+        cited_source = Source(
+            job_id=job["id"],
+            external_id="doi:10.5555/grid-planning-review",
+            title="Grid Planning Review",
+            doi="10.5555/grid-planning-review",
+            url="https://journal.example/grid-planning-review",
+            publisher="Example Journal",
+            source_type="scholarly_article",
+            retrieval_status="full_text_html",
+            metadata_json={"retrieval": {"rights_assessment": {"sharing": "LICENSE_SCOPED"}}},
+        )
+        unreferenced_private_source = Source(
+            job_id=job["id"],
+            external_id="institutional-report:unreferenced-private",
+            title="Unreferenced Private Report",
+            url="https://institute.example/reports/unreferenced",
+            publisher="Independent Institute",
+            source_type="institutional_report",
+            retrieval_status="full_text_html",
+            metadata_json={"retrieval": {"rights_assessment": {"sharing": "CITATION_ONLY"}}},
+        )
+        db.add_all([cited_source, unreferenced_private_source])
+        db.flush()
+        add_test_passage(
+            db,
+            unreferenced_private_source,
+            ordinal=0,
+            locator="Results, paragraph 1",
+            content="Private-source passage that is not cited by this report.",
+            access_level="full_text_html",
+        )
+        report = ResearchReport(
+            job_id=job["id"],
+            status="completed_with_limitations",
+            body_markdown=report_text,
+            citation_map_json={
+                "S1": {
+                    "source_id": cited_source.id,
+                    "title": cited_source.title,
+                    "url": cited_source.url,
+                    "passages": [],
+                }
+            },
+            verification_json={"report_schema_version": 1},
+        )
+        db.add(report)
+        db.commit()
+        report_id = report.id
+
+    exported = client.get(f"/api/v1/reports/{report_id}/export?format=markdown")
+    assert exported.status_code == 200
+    assert report_text in exported.text
+    assert "Report text withheld from export" not in exported.text
 
 
 @pytest.mark.parametrize(

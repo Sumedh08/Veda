@@ -235,9 +235,68 @@ def test_private_or_mixed_dns_answers_are_rejected_before_connect():
 def test_unlicensed_content_is_rejected_before_dns():
     fetcher, calls = _fetcher(lambda *args: pytest.fail("DNS must not run"), [])
     for license_name in (None, "public-domain", "cc-by-nc"):
-        with pytest.raises(SafeFetchError, match="explicitly permitted"):
+        with pytest.raises(SafeFetchError, match="verified, applicable private-research decision"):
             fetcher.fetch_html("https://papers.example/paper", license_name=license_name)
     assert not calls
+
+
+def _private_research_decision(*, domains=("papers.example",), robots_status="rules_checked"):
+    from app.research.rights_policy import RightsContext, evaluate_rights
+
+    return evaluate_rights(
+        RightsContext(
+            source_identity_verified=True,
+            publicly_accessible=True,
+            document_http_status=200,
+            robots_status=robots_status,
+            robots_allows=True if robots_status == "rules_checked" else None,
+            site_terms_status="checked_no_restriction_signal",
+            use_mode="private_research",
+            jurisdiction="IN",
+            work_type="institutional_report",
+            verified_domains=domains,
+            terms_url="https://papers.example/terms",
+        )
+    )
+
+
+def test_unlicensed_private_research_fetch_requires_decision_and_stays_on_verified_domain():
+    html = b"<html><main><p>Verified report evidence.</p></main></html>"
+    fetcher, calls = _fetcher(
+        lambda *args: [_record("93.184.216.34")],
+        [FakeSocket(_response(200, html, "Content-Type: text/html\r\n"))],
+        origin_request_limiter=RecordingOriginLimiter(),
+    )
+
+    document = fetcher.fetch_html(
+        "https://papers.example/reports/item",
+        license_name=None,
+        rights_decision=_private_research_decision(),
+    )
+
+    assert document.text == "Verified report evidence."
+    assert document.host_policy_id == "private-research-v1"
+    assert document.host_terms_url == "https://papers.example/terms"
+    assert document.robots_status == "rules_checked"
+    assert len(calls) == 1  # only the document GET consumes the fake content socket
+
+
+def test_unlicensed_private_research_redirect_outside_verified_domains_is_denied():
+    fetcher, calls = _fetcher(
+        lambda *args: [_record("93.184.216.34")],
+        [FakeSocket(_response(302, headers="Location: https://other.example/report\r\n"))],
+        origin_request_limiter=RecordingOriginLimiter(),
+    )
+
+    with pytest.raises(SafeFetchError) as raised:
+        fetcher.fetch_html(
+            "https://papers.example/reports/item",
+            license_name=None,
+            rights_decision=_private_research_decision(),
+        )
+
+    assert raised.value.code == "verified_domain_boundary"
+    assert len(calls) == 1  # only the source robots + request host DNS path
 
 
 def test_unreviewed_runtime_host_is_rejected_before_dns():
@@ -317,7 +376,7 @@ Allow: /combine
     assert robots_crawl_delay(parse_robots_txt(b"User-agent: *\nCrawl-delay: 15\n")) == 15
 
 
-def test_robots_rejection_unavailable_policy_and_utf8_failure_are_fail_closed():
+def test_robots_disallow_five_xx_and_utf8_failure_are_fail_closed():
     denied, calls = _fetcher(
         lambda *args: [_record("93.184.216.34")],
         [FakeSocket(_response(200, b"<p>Must not be fetched</p>", "Content-Type: text/html\r\n"))],
@@ -333,9 +392,40 @@ def test_robots_rejection_unavailable_policy_and_utf8_failure_are_fail_closed():
         [FakeSocket(_response(200, b"<p>Must not be fetched</p>", "Content-Type: text/html\r\n"))],
         robots_status=404,
     )
-    with pytest.raises(SafeFetchError) as missing_policy:
-        unavailable.fetch_html("https://papers.example/article", license_name="cc-by")
-    assert missing_policy.value.code == "robots_unavailable"
+    missing_policy = unavailable.fetch_html("https://papers.example/article", license_name="cc-by")
+    assert missing_policy.text == "Must not be fetched"
+    assert missing_policy.robots_status == "unavailable_4xx"
+    assert calls == [("93.184.216.34", 443)]
+
+    forbidden_robots, calls = _fetcher(
+        lambda *args: [_record("93.184.216.34")],
+        [FakeSocket(_response(200, b"<p>Document body</p>", "Content-Type: text/html\r\n"))],
+        robots_responses=[_response(403, b"robots unavailable", "Content-Type: text/plain\r\n")],
+    )
+    public_document = forbidden_robots.fetch_html(
+        "https://papers.example/article", license_name="cc-by"
+    )
+    assert public_document.text == "Document body"
+    assert public_document.robots_status == "unavailable_4xx"
+    assert calls == [("93.184.216.34", 443)]
+
+    document_forbidden, calls = _fetcher(
+        lambda *args: [_record("93.184.216.34")],
+        [FakeSocket(_response(403, b"denied", "Content-Type: text/html\r\n"))],
+    )
+    with pytest.raises(SafeFetchError) as document_denial:
+        document_forbidden.fetch_html("https://papers.example/article", license_name="cc-by")
+    assert document_denial.value.code == "access_denied"
+    assert calls == [("93.184.216.34", 443)]
+
+    server_error, calls = _fetcher(
+        lambda *args: [_record("93.184.216.34")],
+        [FakeSocket(_response(200, b"must not fetch", "Content-Type: text/html\r\n"))],
+        robots_status=503,
+    )
+    with pytest.raises(SafeFetchError) as unreachable_policy:
+        server_error.fetch_html("https://papers.example/article", license_name="cc-by")
+    assert unreachable_policy.value.code == "robots_unreachable"
     assert calls == []
 
     delayed, calls = _fetcher(

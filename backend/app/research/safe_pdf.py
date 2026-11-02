@@ -24,12 +24,14 @@ from pypdf import PdfReader, apply_configuration
 from pypdf.errors import LimitReachedError, PdfReadError
 
 from app.research.grobid import GrobidClient, grobid_fallback_error
+from app.research.rights_policy import RightsDecision
 from app.research.safe_fetch import (
     MAX_REDIRECTS,
     PERMITTED_LICENSES,
     REDIRECT_STATUSES,
     SafeFetchError,
     SafeHTMLFetcher,
+    _is_private_research_decision,
 )
 from app.research.structured_documents import StructuredDocument
 
@@ -64,6 +66,7 @@ class SafePDFDocument:
     host_policy_id: str
     host_terms_url: str
     robots_status: str
+    robots_http_status: int | None = None
     structured_document: StructuredDocument | None = None
     parser_name: str = "pypdf"
     parser_version: str | None = None
@@ -71,7 +74,7 @@ class SafePDFDocument:
 
 
 class SafePDFFetcher(SafeHTMLFetcher):
-    """Fetch and extract one explicitly licensed PDF without retaining its bytes."""
+    """Fetch and extract a licensed or rights-policy-approved PDF without retaining bytes."""
 
     document_byte_limit = MAX_PDF_BYTES
 
@@ -85,12 +88,19 @@ class SafePDFFetcher(SafeHTMLFetcher):
         self.timeout_seconds = min(max(0.0, requested_timeout), MAX_PDF_TOTAL_SECONDS)
         self.grobid_client = grobid_client
 
-    def fetch_pdf(self, url: str, *, license_name: str | None) -> SafePDFDocument:
+    def fetch_pdf(
+        self,
+        url: str,
+        *,
+        license_name: str | None,
+        rights_decision: RightsDecision | None = None,
+    ) -> SafePDFDocument:
         license_code = (license_name or "").strip().casefold()
-        if license_code not in PERMITTED_LICENSES:
+        private_research = license_code not in PERMITTED_LICENSES
+        if private_research and not _is_private_research_decision(rights_decision):
             raise SafeFetchError(
-                "license_not_permitted",
-                "PDF retrieval requires an explicitly permitted license.",
+                "rights_basis_unresolved",
+                "Unlicensed PDF retrieval requires a verified, applicable private-research decision.",
             )
         if not isinstance(url, str) or not url or len(url) > 2000:
             raise SafeFetchError("invalid_url", "The source URL is invalid.")
@@ -103,8 +113,16 @@ class SafePDFFetcher(SafeHTMLFetcher):
         robots_status = ""
         for redirect_count in range(min(self.max_redirects, MAX_REDIRECTS) + 1):
             target = self._target(current_url)
-            host_policy = self._check_host_policy(target, license_code)
-            robots_policy = self._check_robots(target, deadline, license_code, host_policy)
+            host_policy = self._check_host_policy(
+                target, license_code, rights_decision=rights_decision if private_research else None
+            )
+            robots_policy = self._check_robots(
+                target,
+                deadline,
+                license_code,
+                host_policy,
+                rights_decision=rights_decision if private_research else None,
+            )
             robots_status = robots_policy.status
             if not original_scheme:
                 original_scheme = target.scheme
@@ -219,6 +237,7 @@ class SafePDFFetcher(SafeHTMLFetcher):
                             host_policy_id=host_policy.policy_id,
                             host_terms_url=host_policy.terms_url,
                             robots_status=robots_status,
+                            robots_http_status=robots_policy.http_status_code,
                             structured_document=grobid_result.structured_document,
                             parser_name=grobid_result.parser_name,
                             parser_version=grobid_result.parser_version,
@@ -243,6 +262,7 @@ class SafePDFFetcher(SafeHTMLFetcher):
                     host_policy_id=host_policy.policy_id,
                     host_terms_url=host_policy.terms_url,
                     robots_status=robots_status,
+                    robots_http_status=robots_policy.http_status_code,
                     parser_name="pypdf",
                     parser_version=PYPDF_VERSION,
                     grobid_fallback_error=grobid_error,

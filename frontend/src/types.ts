@@ -374,6 +374,23 @@ export type Source = {
     scope?: string;
     rights_decision?: string;
     rights_basis?: string;
+    rights_assessment?: {
+      discovery?: string;
+      access?: string;
+      analysis?: string;
+      retention?: string;
+      sharing?: string;
+      basis?: string;
+      policy_version?: string;
+      legal_review_required?: boolean;
+      max_retained_verbatim_characters?: number | null;
+      max_retained_passages?: number | null;
+      robots_status?: string;
+      site_terms_status?: string;
+      terms_url?: string | null;
+      reason_codes?: string[];
+      warnings?: string[];
+    };
     official_page_content?: {
       status?: string;
       reason_code?: string;

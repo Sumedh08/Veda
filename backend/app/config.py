@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     # The estimate endpoint does not consistently return an x-c4-cost receipt.
     # Reserve one credit for that uncertainty before any scrape is dispatched.
     crawl4ai_estimate_reservation_credits: float = Field(default=1.0, ge=0, le=1.0)
+    # Content-rights policy is use-context specific. An empty jurisdiction keeps
+    # unlicensed content metadata-only until the operator configures applicable law.
+    rights_use_mode: str = "private_research"
+    rights_jurisdiction: str = ""
     crossref_mailto: str = ""
     # World Bank D&R API use is restricted to non-commercial purposes absent
     # permission; dispatch requires an explicit operator confirmation.
@@ -85,6 +89,24 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_origins(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("rights_use_mode")
+    @classmethod
+    def validate_rights_use_mode(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in {"private_research", "commercial", "public_sharing"}:
+            raise ValueError(
+                "RIGHTS_USE_MODE must be private_research, commercial, or public_sharing"
+            )
+        return normalized
+
+    @field_validator("rights_jurisdiction", mode="before")
+    @classmethod
+    def validate_rights_jurisdiction(cls, value: str) -> str:
+        normalized = (value or "").strip().upper()
+        if normalized and (len(normalized) != 2 or not normalized.isalpha()):
+            raise ValueError("RIGHTS_JURISDICTION must be two alphabetic characters or empty")
+        return normalized
 
     def validate_security_configuration(self) -> None:
         is_production = self.app_env.lower() in {"production", "prod"}

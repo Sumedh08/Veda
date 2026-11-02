@@ -16,7 +16,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from html.parser import HTMLParser
 from threading import BoundedSemaphore
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
@@ -31,6 +31,7 @@ from app.research.retrieval_rights import (
     ReviewedHostPolicy,
     reviewed_host_policy,
 )
+from app.research.rights_policy import RightsDecision
 
 MAX_DOCUMENT_BYTES = 2_000_000
 MAX_ROBOTS_BYTES = 512 * 1024
@@ -44,6 +45,35 @@ REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 ROBOTS_CACHE_SECONDS = 24 * 60 * 60
 _DNS_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="veda-dns")
 _DNS_SLOTS = BoundedSemaphore(4)
+
+
+def _is_private_research_decision(value: RightsDecision | None) -> bool:
+    return bool(
+        isinstance(value, RightsDecision)
+        and value.basis == "india_private_research_exception_candidate"
+        and value.access == "PERMITTED"
+        and value.analysis == "PERMITTED_WITH_LIMITATIONS"
+        and value.retention == "LIMITED_EXCERPTS"
+        and value.sharing == "CITATION_ONLY"
+        and value.max_retained_passages is not None
+        and value.max_retained_verbatim_characters is not None
+    )
+
+
+def _host_within_domains(host: str, domains: tuple[str, ...]) -> bool:
+    try:
+        normalized_host = host.encode("idna").decode("ascii").casefold().rstrip(".")
+        normalized_domains = [
+            domain.encode("idna").decode("ascii").casefold().rstrip(".")
+            for domain in domains
+            if isinstance(domain, str) and domain.strip() and "*" not in domain
+        ]
+    except UnicodeError:
+        return False
+    return any(
+        normalized_host == domain or normalized_host.endswith("." + domain)
+        for domain in normalized_domains
+    )
 
 
 def _system_resolve(host: str, port: int, socktype: int):
@@ -64,6 +94,7 @@ class SafeHTMLAccessContext:
     host_policy_id: str
     host_terms_url: str
     robots_status: str
+    robots_http_status: int | None = None
 
 
 class SafeFetchError(Exception):
@@ -87,6 +118,7 @@ class SafeHTMLDocument:
     host_policy_id: str
     host_terms_url: str
     robots_status: str
+    robots_http_status: int | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +139,7 @@ class _RobotsCacheEntry:
     groups: tuple[_RobotsGroup, ...]
     status: str
     expires_at: float
+    http_status_code: int | None = None
 
     @property
     def crawl_delay_seconds(self) -> float:
@@ -395,12 +428,19 @@ class SafeHTMLFetcher:
         self.origin_request_limiter = origin_request_limiter
         self._robots_cache: dict[str, _RobotsCacheEntry] = {}
 
-    def fetch_html(self, url: str, *, license_name: str | None) -> SafeHTMLDocument:
+    def fetch_html(
+        self,
+        url: str,
+        *,
+        license_name: str | None,
+        rights_decision: RightsDecision | None = None,
+    ) -> SafeHTMLDocument:
         license_code = (license_name or "").strip().casefold()
-        if license_code not in PERMITTED_LICENSES:
+        private_research = license_code not in PERMITTED_LICENSES
+        if private_research and not _is_private_research_decision(rights_decision):
             raise SafeFetchError(
-                "license_not_permitted",
-                "Full-text retrieval requires an explicitly permitted license.",
+                "rights_basis_unresolved",
+                "Unlicensed HTML requires a verified, applicable private-research decision.",
             )
         if not isinstance(url, str) or not url or len(url) > 2000:
             raise SafeFetchError("invalid_url", "The source URL is invalid.")
@@ -413,9 +453,17 @@ class SafeHTMLFetcher:
         robots_status = ""
         for redirect_count in range(self.max_redirects + 1):
             target = self._target(current_url)
-            host_policy = self._check_host_policy(target, license_code)
+            host_policy = self._check_host_policy(
+                target, license_code, rights_decision=rights_decision if private_research else None
+            )
             robots_status = ""
-            robots_policy = self._check_robots(target, deadline, license_code, host_policy)
+            robots_policy = self._check_robots(
+                target,
+                deadline,
+                license_code,
+                host_policy,
+                rights_decision=rights_decision if private_research else None,
+            )
             robots_status = robots_policy.status
             if not original_scheme:
                 original_scheme = target.scheme
@@ -434,7 +482,9 @@ class SafeHTMLFetcher:
                     ),
                 )
             except SafeFetchError as exc:
-                self._attach_access_context(exc, target, host_policy, robots_status)
+                self._attach_access_context(
+                    exc, target, host_policy, robots_status, robots_policy.http_status_code
+                )
                 raise
             try:
                 if response.status in REDIRECT_STATUSES:
@@ -452,8 +502,15 @@ class SafeHTMLFetcher:
                     current_url = next_url
                     continue
                 if response.status != 200:
+                    status_codes = {
+                        401: "authentication_required",
+                        403: "access_denied",
+                        404: "not_found",
+                        429: "rate_limited",
+                    }
                     raise SafeFetchError(
-                        "http_status", "The source did not return a successful response."
+                        status_codes.get(response.status, "http_status"),
+                        "The source did not return a successful response.",
                     )
 
                 media_type = response.headers.get_content_type().lower()
@@ -516,16 +573,47 @@ class SafeHTMLFetcher:
                     host_policy_id=host_policy.policy_id,
                     host_terms_url=host_policy.terms_url,
                     robots_status=robots_status,
+                    robots_http_status=robots_policy.http_status_code,
                 )
             except SafeFetchError as exc:
-                self._attach_access_context(exc, target, host_policy, robots_status)
+                self._attach_access_context(
+                    exc, target, host_policy, robots_status, robots_policy.http_status_code
+                )
                 raise
             finally:
                 response.close()
                 sock.close()
         raise SafeFetchError("redirect_limit", "The source exceeded the redirect limit.")
 
-    def _check_host_policy(self, target: "_Target", license_code: str) -> ReviewedHostPolicy:
+    def _check_host_policy(
+        self,
+        target: "_Target",
+        license_code: str,
+        *,
+        rights_decision: RightsDecision | None = None,
+    ) -> ReviewedHostPolicy:
+        if rights_decision is not None:
+            if not _is_private_research_decision(rights_decision):
+                raise SafeFetchError(
+                    "rights_basis_unresolved", "The private-research rights decision is not usable."
+                )
+            if target.scheme != "https" or target.port not in {None, 443}:
+                raise SafeFetchError(
+                    "private_research_requires_https", "Private-research retrieval requires HTTPS."
+                )
+            if not _host_within_domains(target.host, rights_decision.verified_domains):
+                raise SafeFetchError(
+                    "verified_domain_boundary",
+                    "The URL is outside the verified organization domain.",
+                )
+            return ReviewedHostPolicy(
+                host=target.host,
+                policy_id=rights_decision.policy_version,
+                terms_url=rights_decision.terms_url or "",
+                reviewed_at=date.today(),
+                licenses=frozenset(),
+                minimum_interval_seconds=1.0,
+            )
         try:
             return self.host_policy_checker(target.host, license_code)
         except ValueError as exc:
@@ -555,13 +643,15 @@ class SafeHTMLFetcher:
         target: "_Target",
         host_policy: ReviewedHostPolicy,
         robots_status: str,
+        robots_http_status: int | None,
     ) -> None:
-        if robots_status == "rules_checked":
+        if robots_status in {"rules_checked", "unavailable_4xx"}:
             error.access_context = SafeHTMLAccessContext(
                 final_host=target.host,
                 host_policy_id=host_policy.policy_id,
                 host_terms_url=host_policy.terms_url,
                 robots_status=robots_status,
+                robots_http_status=robots_http_status,
             )
 
     def _check_robots(
@@ -570,12 +660,19 @@ class SafeHTMLFetcher:
         deadline: float,
         license_code: str,
         initial_policy: ReviewedHostPolicy,
+        *,
+        rights_decision: RightsDecision | None = None,
     ) -> _RobotsCacheEntry:
         origin = f"{target.scheme}://{target.netloc}"
         cached = self._robots_cache.get(origin)
         if cached is None or cached.expires_at <= time.monotonic():
             cached = self._load_robots_policy(
-                target, origin, deadline, license_code, initial_policy
+                target,
+                origin,
+                deadline,
+                license_code,
+                initial_policy,
+                rights_decision=rights_decision,
             )
             self._robots_cache[origin] = cached
         if not robots_allows(cached.groups, _robots_path_and_query(target)):
@@ -596,6 +693,8 @@ class SafeHTMLFetcher:
         deadline: float,
         license_code: str,
         initial_policy: ReviewedHostPolicy,
+        *,
+        rights_decision: RightsDecision | None = None,
     ) -> _RobotsCacheEntry:
         current_url = f"{origin}/robots.txt"
         visited: set[str] = set()
@@ -605,7 +704,9 @@ class SafeHTMLFetcher:
                 target_policy = (
                     initial_policy
                     if target.origin == initial_target.origin
-                    else self._check_host_policy(target, license_code)
+                    else self._check_host_policy(
+                        target, license_code, rights_decision=rights_decision
+                    )
                 )
                 canonical = urlunsplit(
                     (target.scheme, target.netloc, target.path, target.query, "")
@@ -637,8 +738,24 @@ class SafeHTMLFetcher:
                             )
                         current_url = next_url
                         continue
-                    # A deliberately stricter policy than RFC 9309's optional 4xx
-                    # allowance: missing, forbidden, or unexpected rules deny retrieval.
+                    # RFC 9309 classifies HTTP 4xx as unavailable, for which a
+                    # crawler MAY access resources. 429 is a rate-limit defer;
+                    # 5xx and network failures remain complete-disallow.
+                    if response.status == 429:
+                        raise SafeFetchError(
+                            "robots_rate_limited", "The host robots policy is rate limited."
+                        )
+                    if 400 <= response.status <= 499:
+                        return _RobotsCacheEntry(
+                            groups=(),
+                            status="unavailable_4xx",
+                            expires_at=time.monotonic() + ROBOTS_CACHE_SECONDS,
+                            http_status_code=response.status,
+                        )
+                    if 500 <= response.status <= 599:
+                        raise SafeFetchError(
+                            "robots_unreachable", "The host access policy is unavailable."
+                        )
                     if response.status != 200:
                         raise SafeFetchError(
                             "robots_unavailable", "The host access policy is unavailable."
@@ -674,6 +791,7 @@ class SafeHTMLFetcher:
                         groups=groups,
                         status="rules_checked",
                         expires_at=time.monotonic() + ROBOTS_CACHE_SECONDS,
+                        http_status_code=200,
                     )
                 finally:
                     response.close()

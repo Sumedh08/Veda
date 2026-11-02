@@ -155,6 +155,7 @@ from app.research.retrieval_outcomes import (
     retrieval_metadata_for_api,
 )
 from app.research.retrieval_rights import reviewed_host_policy
+from app.research.rights_policy import RightsContext, RightsDecision, evaluate_rights
 from app.research.safe_fetch import (
     MAX_TOTAL_SECONDS,
     PERMITTED_LICENSES,
@@ -2478,13 +2479,15 @@ def _official_page_metadata_verified_html_location(
     source_url: str | None,
     organization_evidence: dict[str, Any],
     page_metadata_evidence: dict[str, Any],
+    use_mode: str = "private_research",
+    jurisdiction: str | None = None,
+    work_type: str = "institutional_report",
 ) -> tuple[dict[str, Any], Any] | None:
-    """Resolve a DOI-independent official HTML source using item and host evidence.
+    """Resolve official HTML under an item license or a configured private profile.
 
-    A DOI or ROR identifier is not required when an already-qualified organization
-    identity, exact official-domain publication page, robot-checked title/canonical
-    metadata, and an unambiguous item-level reuse license are persisted. The exact
-    response host must still have an independently reviewed host policy.
+    Identity, publication metadata, automated access, analysis basis, retention,
+    and sharing stay separate. A DOI or ROR is optional where the verified
+    organization and page metadata already establish the relevant identities.
     """
     if (
         not isinstance(source_url, str)
@@ -2497,38 +2500,49 @@ def _official_page_metadata_verified_html_location(
         or organization_evidence.get("publisher_verification") != "official_page_metadata_verified"
         or organization_evidence.get("official_publication_url") != source_url
         or page_metadata_evidence.get("page_metadata_verification")
-        != "robots_allowed_title_and_canonical_match"
+        not in {
+            "robots_allowed_title_and_canonical_match",
+            "robots_unavailable_4xx_title_and_canonical_match",
+        }
         or page_metadata_evidence.get("metadata_kind")
         not in {"citation_metadata", "dublin_core_metadata", "open_graph_article_metadata"}
-        or page_metadata_evidence.get("license_status") != "recognized_item_license"
-        or page_metadata_evidence.get("license_evidence")
-        not in {"official_page_rel_license", "official_page_license_metadata"}
     ):
         return None
-
-    license_code = page_metadata_evidence.get("license_code")
-    license_url = page_metadata_evidence.get("license_url")
+    item_restrictions = page_metadata_evidence.get("item_specific_restriction_codes")
+    if item_restrictions is not None:
+        if (
+            not isinstance(item_restrictions, list)
+            or len(item_restrictions) > 16
+            or any(not isinstance(code, str) or not code.strip() for code in item_restrictions)
+            or item_restrictions
+        ):
+            return None
     safe_source_url = CrossrefProvider._safe_https_url(source_url)
-    safe_license_url = (
-        CrossrefProvider._safe_https_url(license_url) if isinstance(license_url, str) else None
-    )
-    if (
-        safe_source_url is None
-        or safe_source_url != source_url
-        or safe_license_url is None
-        or license_code not in PERMITTED_LICENSES
-        or CrossrefProvider._license_code(safe_license_url) != license_code
-    ):
+    if safe_source_url is None or safe_source_url != source_url:
         return None
 
+    raw_domains = organization_evidence.get("official_domains")
+    domains = (
+        [item for item in raw_domains if isinstance(item, str)]
+        if isinstance(raw_domains, list)
+        else []
+    )
     official_domain = organization_evidence.get("official_domain")
-    if not isinstance(official_domain, str) or not official_domain.strip():
+    if isinstance(official_domain, str):
+        domains.append(official_domain)
+    if not domains:
         return None
     try:
         parsed = urlsplit(safe_source_url)
         port = parsed.port
         host = (parsed.hostname or "").encode("idna").decode("ascii").casefold().rstrip(".")
-        domain = official_domain.encode("idna").decode("ascii").casefold().rstrip(".")
+        verified_domains = tuple(
+            dict.fromkeys(
+                item.encode("idna").decode("ascii").casefold().rstrip(".")
+                for item in domains
+                if item.strip() and "*" not in item
+            )
+        )
     except (UnicodeError, ValueError):
         return None
     if (
@@ -2537,22 +2551,98 @@ def _official_page_metadata_verified_html_location(
         or parsed.password is not None
         or port not in {None, 443}
         or not host
-        or (host != domain and not host.endswith("." + domain))
+        or not any(host == domain or host.endswith("." + domain) for domain in verified_domains)
     ):
         return None
-    try:
-        host_policy = reviewed_host_policy(host, license_code)
-    except ValueError:
+    raw_pdf_url = page_metadata_evidence.get("linked_pdf_url")
+    safe_pdf_url = (
+        CrossrefProvider._safe_https_url(raw_pdf_url) if isinstance(raw_pdf_url, str) else None
+    )
+    if safe_pdf_url is not None:
+        pdf_host = (urlsplit(safe_pdf_url).hostname or "").casefold()
+        if not any(
+            pdf_host == domain or pdf_host.endswith("." + domain) for domain in verified_domains
+        ):
+            safe_pdf_url = None
+
+    license_code = page_metadata_evidence.get("license_code")
+    license_url = page_metadata_evidence.get("license_url")
+    safe_license_url = (
+        CrossrefProvider._safe_https_url(license_url) if isinstance(license_url, str) else None
+    )
+    if (
+        page_metadata_evidence.get("license_status") == "recognized_item_license"
+        and page_metadata_evidence.get("license_evidence")
+        in {"official_page_rel_license", "official_page_license_metadata"}
+        and safe_license_url is not None
+        and license_code in PERMITTED_LICENSES
+        and CrossrefProvider._license_code(safe_license_url) == license_code
+    ):
+        try:
+            host_policy = reviewed_host_policy(host, license_code)
+        except ValueError:
+            return None
+        return (
+            {
+                "is_oa": True,
+                "landing_page_url": safe_source_url,
+                "pdf_url": safe_pdf_url,
+                "license": license_code,
+                "version": "official_page",
+            },
+            host_policy,
+        )
+
+    if page_metadata_evidence.get("license_status") != "not_declared":
+        return None
+    robots_status = page_metadata_evidence.get("robots_status")
+    if robots_status not in {"rules_checked", "unavailable_4xx"}:
+        return None
+    terms = page_metadata_evidence.get("site_terms")
+    if not isinstance(terms, dict):
+        terms = page_metadata_evidence
+    terms_status = terms.get("site_terms_status", "not_checked")
+    terms_url = terms.get("site_terms_url")
+    safe_terms_url = (
+        CrossrefProvider._safe_https_url(terms_url) if isinstance(terms_url, str) else None
+    )
+    if isinstance(terms_url, str):
+        terms_host = (urlsplit(safe_terms_url).hostname or "").casefold() if safe_terms_url else ""
+        if safe_terms_url != terms_url or not any(
+            terms_host == domain or terms_host.endswith("." + domain) for domain in verified_domains
+        ):
+            terms_status = "unavailable"
+            safe_terms_url = None
+    if terms_status == "checked_no_restriction_signal" and safe_terms_url is None:
+        terms_status = "unavailable"
+    rights = evaluate_rights(
+        RightsContext(
+            source_identity_verified=True,
+            publicly_accessible=True,
+            document_http_status=200,
+            robots_status=robots_status,
+            robots_allows=True if robots_status == "rules_checked" else None,
+            site_terms_status=terms_status,
+            use_mode=use_mode,
+            jurisdiction=jurisdiction,
+            work_type=work_type,
+            license_status="not_stated",
+            verified_domains=verified_domains,
+            terms_url=safe_terms_url,
+            item_specific_restriction=bool(terms.get("item_specific_restriction", False)),
+        )
+    )
+    if not rights.may_fetch_for_analysis:
         return None
     return (
         {
             "is_oa": True,
             "landing_page_url": safe_source_url,
-            "pdf_url": None,
-            "license": license_code,
+            "pdf_url": safe_pdf_url,
+            "license": None,
             "version": "official_page",
         },
-        host_policy,
+        rights,
     )
 
 
@@ -4331,8 +4421,28 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                         "license_status": page_metadata.license_status,
                                                         "observed_at": page_metadata.retrieved_at,
                                                     },
+                                                    "official_page_access": {
+                                                        "robots_status": page_metadata.robots_status,
+                                                        "robots_http_status": page_metadata.robots_http_status,
+                                                        "linked_pdf_url": page_metadata.linked_pdf_url,
+                                                        "item_specific_restriction_codes": list(
+                                                            page_metadata.item_specific_restriction_codes
+                                                        ),
+                                                        "copyright_notice_detected": page_metadata.copyright_notice_detected,
+                                                        "site_terms": {
+                                                            "site_terms_status": page_metadata.site_terms_status,
+                                                            "site_terms_url": page_metadata.site_terms_url,
+                                                            "site_terms_sha256": page_metadata.site_terms_sha256,
+                                                            "site_terms_restriction_codes": list(
+                                                                page_metadata.site_terms_restriction_codes
+                                                            ),
+                                                        },
+                                                    },
                                                     "page_metadata_verification": (
                                                         "robots_allowed_title_and_canonical_match"
+                                                        if page_metadata.robots_status
+                                                        == "rules_checked"
+                                                        else "robots_unavailable_4xx_title_and_canonical_match"
                                                     ),
                                                     "page_metadata_kind": page_metadata.metadata_kind,
                                                     "page_metadata_retrieved_at": (
@@ -4371,6 +4481,21 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                         "license_url": page_metadata.license_url,
                                                         "license_evidence": page_metadata.license_evidence,
                                                         "license_status": page_metadata.license_status,
+                                                    },
+                                                    "robots_status": page_metadata.robots_status,
+                                                    "robots_http_status": page_metadata.robots_http_status,
+                                                    "linked_pdf_url": page_metadata.linked_pdf_url,
+                                                    "item_specific_restriction_codes": list(
+                                                        page_metadata.item_specific_restriction_codes
+                                                    ),
+                                                    "copyright_notice_detected": page_metadata.copyright_notice_detected,
+                                                    "site_terms": {
+                                                        "site_terms_status": page_metadata.site_terms_status,
+                                                        "site_terms_url": page_metadata.site_terms_url,
+                                                        "site_terms_sha256": page_metadata.site_terms_sha256,
+                                                        "site_terms_restriction_codes": list(
+                                                            page_metadata.site_terms_restriction_codes
+                                                        ),
                                                     },
                                                     "rights_status": (
                                                         "item_license_identified_not_yet_accessed"
@@ -7010,6 +7135,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                 if isinstance(source.metadata_json.get("retrieval"), dict)
                 else {}
             )
+            source_rights_decision: RightsDecision | None = None
             if (fulltext_pmcid is not None or source.doi) and "jats" in requested_retry_kinds:
                 attempted_at = utcnow()
                 jats_meta: dict[str, Any] = {
@@ -7801,6 +7927,21 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                             if isinstance(organization_evidence, dict)
                             else {}
                         ),
+                        "site_terms": (
+                            official_site_evidence.get("site_terms", {})
+                            if isinstance(official_site_evidence, dict)
+                            else {}
+                        ),
+                        "robots_status": (
+                            official_site_evidence.get("robots_status")
+                            if isinstance(official_site_evidence, dict)
+                            else None
+                        ),
+                        "linked_pdf_url": (
+                            official_site_evidence.get("linked_pdf_url")
+                            if isinstance(official_site_evidence, dict)
+                            else None
+                        ),
                     }
                     if isinstance(official_site_evidence, dict)
                     else {}
@@ -7815,13 +7956,29 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                         organization_evidence if isinstance(organization_evidence, dict) else {}
                     ),
                     page_metadata_evidence=page_metadata_evidence,
+                    use_mode=settings.rights_use_mode,
+                    jurisdiction=settings.rights_jurisdiction or None,
+                    work_type=source.source_type,
                 )
                 if official_html is None:
                     retrieval_meta["official_page_content"] = {
                         "status": "not_attempted",
-                        "reason_code": "item_license_or_host_policy_not_verified",
+                        "reason_code": (
+                            "item_specific_restriction_requires_review"
+                            if page_metadata_evidence.get("item_specific_restriction_codes")
+                            else "rights_or_identity_review_required"
+                            if page_metadata_evidence.get("license_status") == "not_declared"
+                            else "item_license_or_host_policy_not_verified"
+                        ),
                         "rights_status": (
                             page_metadata_evidence.get("license_status", "not_assessed")
+                        ),
+                        "site_terms_status": (
+                            (page_metadata_evidence.get("site_terms") or {}).get(
+                                "site_terms_status", "not_checked"
+                            )
+                            if isinstance(page_metadata_evidence.get("site_terms"), dict)
+                            else "not_checked"
                         ),
                         "content_retained": False,
                     }
@@ -7830,26 +7987,52 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                     source.metadata_json = source_metadata
                     continue
                 best_location, official_host_policy = official_html
-                retrieval_meta.update(
-                    {
-                        "scope": "official_page_item_licensed_verified_publication",
-                        "license": best_location["license"],
-                        "license_evidence": page_metadata_evidence.get("license_evidence"),
-                        "license_url": page_metadata_evidence.get("license_url"),
-                        "rights_decision": "PERMITTED_WITH_RESTRICTIONS",
-                        "rights_basis": (
-                            "recognized item license, verified official publication metadata, "
-                            "checked robots rules, and exact reviewed host policy"
-                        ),
-                        "site_policy_status": "reviewed_host_and_item_license_match",
-                        "host_policy_id": official_host_policy.policy_id,
-                        "host_terms_url": official_host_policy.terms_url,
-                        "official_publication_url": best_location["landing_page_url"],
-                        "publisher_identity_source": organization_evidence.get(
-                            "verification_source"
-                        ),
-                    }
-                )
+                if isinstance(official_host_policy, RightsDecision):
+                    source_rights_decision = official_host_policy
+                    site_terms_evidence = page_metadata_evidence.get("site_terms")
+                    retrieval_meta.update(
+                        {
+                            "scope": "official_page_private_research_verified_publication",
+                            "license": None,
+                            "rights_decision": source_rights_decision.analysis,
+                            "rights_basis": source_rights_decision.basis,
+                            "rights_assessment": source_rights_decision.to_dict(),
+                            "site_terms_evidence": (
+                                site_terms_evidence if isinstance(site_terms_evidence, dict) else {}
+                            ),
+                            "robots_http_status": page_metadata_evidence.get("robots_http_status"),
+                            "site_policy_status": "verified_domain_terms_and_robots_checked",
+                            "host_policy_id": source_rights_decision.policy_version,
+                            "host_terms_url": source_rights_decision.terms_url,
+                            "official_publication_url": best_location["landing_page_url"],
+                            "publisher_identity_source": organization_evidence.get(
+                                "verification_source"
+                            ),
+                            "retention_limit_characters": source_rights_decision.max_retained_verbatim_characters,
+                            "retention_limit_passages": source_rights_decision.max_retained_passages,
+                        }
+                    )
+                else:
+                    retrieval_meta.update(
+                        {
+                            "scope": "official_page_item_licensed_verified_publication",
+                            "license": best_location["license"],
+                            "license_evidence": page_metadata_evidence.get("license_evidence"),
+                            "license_url": page_metadata_evidence.get("license_url"),
+                            "rights_decision": "PERMITTED_WITH_RESTRICTIONS",
+                            "rights_basis": (
+                                "recognized item license, verified official publication metadata, "
+                                "checked robots rules, and exact reviewed host policy"
+                            ),
+                            "site_policy_status": "reviewed_host_and_item_license_match",
+                            "host_policy_id": official_host_policy.policy_id,
+                            "host_terms_url": official_host_policy.terms_url,
+                            "official_publication_url": best_location["landing_page_url"],
+                            "publisher_identity_source": organization_evidence.get(
+                                "verification_source"
+                            ),
+                        }
+                    )
             elif provider_name != "OpenAlex" or not isinstance(best_location, dict):
                 source_metadata = dict(source.metadata_json or {})
                 source_metadata["retrieval"] = retrieval_meta
@@ -7884,15 +8067,28 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                     outcome="not_attempted",
                     reason_code="openalex_location_not_marked_oa",
                 )
-            elif license_code not in PERMITTED_LICENSES:
+            elif license_code not in PERMITTED_LICENSES and not (
+                source_rights_decision is not None and source_rights_decision.may_fetch_for_analysis
+            ):
+                rights_reason = (
+                    "rights_basis_unresolved"
+                    if source_rights_decision is not None
+                    else "license_not_verified_for_reuse"
+                )
                 retrieval_meta.update(
-                    status="not_attempted", reason="license_not_verified_for_reuse"
+                    status="not_attempted",
+                    reason=rights_reason,
+                    rights_decision=(
+                        source_rights_decision.to_dict()
+                        if source_rights_decision is not None
+                        else None
+                    ),
                 )
                 record_attempt_outcome(
                     retrieval_meta,
                     format="html",
                     outcome="not_attempted",
-                    reason_code="license_not_verified_for_reuse",
+                    reason_code=rights_reason,
                 )
             elif not isinstance(landing_url, str) or not landing_url:
                 retrieval_meta.update(
@@ -7948,12 +8144,16 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                 page_access_context: SafeHTMLAccessContext | None = None
                 page_fetch_error_code: str | None = None
                 try:
-                    document = fetcher.fetch_html(landing_url, license_name=license_code)
+                    fetch_options: dict[str, Any] = {"license_name": license_code}
+                    if source_rights_decision is not None:
+                        fetch_options["rights_decision"] = source_rights_decision
+                    document = fetcher.fetch_html(landing_url, **fetch_options)
                     page_access_context = SafeHTMLAccessContext(
                         final_host=document.final_host,
                         host_policy_id=document.host_policy_id,
                         host_terms_url=document.host_terms_url,
                         robots_status=document.robots_status,
+                        robots_http_status=document.robots_http_status,
                     )
                 except SafeFetchError as exc:
                     if exc.code == "timeout" and isinstance(
@@ -8040,6 +8240,8 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                         "host_policy_id": page_access_context.host_policy_id,
                         "host_terms_url": page_access_context.host_terms_url,
                         "robots_status": page_access_context.robots_status,
+                        "robots_http_status": page_access_context.robots_http_status,
+                        "rights_assessment": retrieval_meta.get("rights_assessment"),
                         "truncated": document.truncated if document is not None else False,
                     }
                     ordinary_html_is_usable = bool(content_text.strip()) and not (
@@ -8729,6 +8931,8 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                     )
                                     if len(sentence) <= 280
                                 )
+                        private_retained_passages = 0
+                        private_retained_characters = 0
                         for (
                             paragraph_number,
                             sentence_number,
@@ -8745,6 +8949,19 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                 break
                             if len(sentence) > 280:
                                 continue
+                            if source_rights_decision is not None:
+                                passage_cap = source_rights_decision.max_retained_passages
+                                character_cap = (
+                                    source_rights_decision.max_retained_verbatim_characters
+                                )
+                                if (
+                                    passage_cap is None
+                                    or character_cap is None
+                                    or private_retained_passages >= passage_cap
+                                ):
+                                    break
+                                if private_retained_characters + len(sentence) > character_cap:
+                                    continue
                             locator_prefix = (
                                 "Crawl4AI Cloud Markdown"
                                 if content_hash_scope == "bounded_provider_excerpt"
@@ -8768,6 +8985,9 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                             claims_out.extend(_extracted_claim_units(passage))
                             ordinal += 1
                             html_passage_count += 1
+                            if source_rights_decision is not None:
+                                private_retained_passages += 1
+                                private_retained_characters += len(sentence)
                     elif crawl4ai_page_state is None:
                         record_attempt_outcome(
                             retrieval_meta,
@@ -8791,8 +9011,16 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
             pdf_url = best_location.get("pdf_url")
             if (
                 source.retrieval_status not in {"full_text_html", "full_text_jats"}
+                and retrieval_meta.get("error_code")
+                not in {"authentication_required", "access_denied"}
                 and best_location.get("is_oa") is True
-                and license_code in PERMITTED_LICENSES
+                and (
+                    license_code in PERMITTED_LICENSES
+                    or (
+                        source_rights_decision is not None
+                        and source_rights_decision.may_fetch_for_analysis
+                    )
+                )
                 and isinstance(pdf_url, str)
                 and pdf_url
                 and "pdf" in requested_retry_kinds
@@ -8845,8 +9073,11 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                             pdf_fetcher_options["grobid_client"] = GrobidClient(
                                 base_url=settings.grobid_base_url
                             )
+                        pdf_fetch_arguments: dict[str, Any] = {"license_name": license_code}
+                        if source_rights_decision is not None:
+                            pdf_fetch_arguments["rights_decision"] = source_rights_decision
                         pdf_document = SafePDFFetcher(**pdf_fetcher_options).fetch_pdf(
-                            pdf_url, license_name=license_code
+                            pdf_url, **pdf_fetch_arguments
                         )
                     except SafeFetchError as exc:
                         deferred = exc.code == "origin_request_deferred"
@@ -8931,6 +9162,8 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                 "host_policy_id": pdf_document.host_policy_id,
                                 "host_terms_url": pdf_document.host_terms_url,
                                 "robots_status": pdf_document.robots_status,
+                                "robots_http_status": pdf_document.robots_http_status,
+                                "rights_assessment": retrieval_meta.get("rights_assessment"),
                                 "page_count": pdf_document.page_count,
                                 "pages_extracted": pdf_document.pages_extracted,
                                 "parser_name": pdf_document.parser_name,
@@ -8961,6 +9194,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                             host_policy_id=pdf_document.host_policy_id,
                             host_terms_url=pdf_document.host_terms_url,
                             robots_status=pdf_document.robots_status,
+                            robots_http_status=pdf_document.robots_http_status,
                             parser_name=pdf_document.parser_name,
                             parser_version=pdf_document.parser_version or "unreported",
                             grobid_fallback_error=pdf_document.grobid_fallback_error,
@@ -9010,6 +9244,8 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                             )
                         )
                         retrieval_meta.pop("error_code", None)
+                        private_pdf_retained_passages = 0
+                        private_pdf_retained_characters = 0
                         if pdf_document.structured_document is not None:
                             source_pdf_passage_count = 0
                             structured_paragraphs_processed = 0
@@ -9034,9 +9270,27 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                         break
                                     if len(passages_out) >= profile.max_passages:
                                         break
-                                    if len(sentence) > 600:
+                                    if len(sentence) > (
+                                        280 if source_rights_decision is not None else 600
+                                    ):
                                         overlong_sentences_skipped += 1
                                         continue
+                                    if source_rights_decision is not None:
+                                        passage_cap = source_rights_decision.max_retained_passages
+                                        character_cap = (
+                                            source_rights_decision.max_retained_verbatim_characters
+                                        )
+                                        if (
+                                            passage_cap is None
+                                            or character_cap is None
+                                            or private_pdf_retained_passages >= passage_cap
+                                        ):
+                                            break
+                                        if (
+                                            private_pdf_retained_characters + len(sentence)
+                                            > character_cap
+                                        ):
+                                            continue
                                     locator = (
                                         f"TEI {section_label} [{section_reference}] "
                                         f"paragraph {paragraph.paragraph_index} sentence {sentence_number}"
@@ -9055,6 +9309,9 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                     ordinal += 1
                                     pdf_passage_count += 1
                                     source_pdf_passage_count += 1
+                                    if source_rights_decision is not None:
+                                        private_pdf_retained_passages += 1
+                                        private_pdf_retained_characters += len(sentence)
                                     extracted_section_types.add(paragraph.section_type)
                                     paragraph_had_passage = True
                                 structured_paragraphs_with_passages += int(paragraph_had_passage)
@@ -9091,6 +9348,22 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                     break
                                 if len(sentence) > 280:
                                     continue
+                                if source_rights_decision is not None:
+                                    passage_cap = source_rights_decision.max_retained_passages
+                                    character_cap = (
+                                        source_rights_decision.max_retained_verbatim_characters
+                                    )
+                                    if (
+                                        passage_cap is None
+                                        or character_cap is None
+                                        or private_pdf_retained_passages >= passage_cap
+                                    ):
+                                        break
+                                    if (
+                                        private_pdf_retained_characters + len(sentence)
+                                        > character_cap
+                                    ):
+                                        continue
                                 locator = f"PDF page {page_number}, sentence {sentence_number}"
                                 passage = _passage_record(
                                     source_id=source.id,
@@ -9105,6 +9378,9 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                 claims_out.extend(_extracted_claim_units(passage))
                                 ordinal += 1
                                 pdf_passage_count += 1
+                                if source_rights_decision is not None:
+                                    private_pdf_retained_passages += 1
+                                    private_pdf_retained_characters += len(sentence)
                         is_partial = (
                             is_partial
                             or time_limit_reached
@@ -12004,7 +12280,7 @@ def _build_limited_report(
             f"- The discovery stage recorded {len(sources)} source records across the providers listed in search coverage.",
             f"- Source access summary: {_source_access_summary(db, job['id'], sources)}",
             f"- Applied research-depth limits and observed resource use: {_depth_limit_summary(db, job)}",
-            "- Abstract excerpts and bibliographic metadata are not equivalent to full-text study review; only a small, rights-gated set of HTML passages or bounded embedded-text PDF passages may be available. PDF extraction does not use OCR or inspect tables.",
+            "- Abstract excerpts and bibliographic metadata are not equivalent to full-text study review; only a small, rights-gated set of HTML passages or bounded embedded-text PDF passages may be available. A configured private-research rights profile does not grant redistribution permission. PDF extraction does not use OCR or inspect tables.",
             "- No independent methodological appraisal or causal interpretation is provided. Any model-assisted appraisal stored with a source is unverified.",
             "- Claims above reproduce short statements from stored source passages; Veda has not independently verified their truth.",
             "- No company-specific ROI was estimated. Model-generated synthesis and semantic citation checks did not run for this report.",
@@ -12027,6 +12303,29 @@ def _build_limited_report(
                 else (f" {source.url}" if source.url else "")
             )
             citation_line = f"- [{cite}] {source.title}{year}. {authors}.{doi} Access status: {source.retrieval_status}."
+            source_retrieval = (source.metadata_json or {}).get("retrieval", {})
+            rights_assessment = (
+                source_retrieval.get("rights_assessment")
+                if isinstance(source_retrieval, dict)
+                else None
+            )
+            if isinstance(rights_assessment, dict):
+                citation_line += (
+                    " Research-use rights: "
+                    f"analysis={rights_assessment.get('analysis', 'not assessed')}; "
+                    f"retention={rights_assessment.get('retention', 'not assessed')}; "
+                    f"sharing={rights_assessment.get('sharing', 'not assessed')}; "
+                    f"basis={rights_assessment.get('basis', 'unresolved')}."
+                )
+                if (
+                    rights_assessment.get("legal_review_required") is False
+                    and rights_assessment.get("basis")
+                    == "india_private_research_exception_candidate"
+                ):
+                    citation_line += (
+                        " This is a configured, jurisdiction-specific policy candidate, "
+                        "not a legal opinion or redistribution grant."
+                    )
             if not item.get("passages"):
                 citation_line += " No source passage is linked here; this record does not support a claim in the evidence map."
             if source.source_type == "official_statistics":

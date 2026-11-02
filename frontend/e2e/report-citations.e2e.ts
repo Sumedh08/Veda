@@ -466,6 +466,7 @@ async function installApiFixtures(
     fullTextEvidence?: boolean;
     openAlexContentAvailability?: { pdf?: boolean; grobid_xml?: boolean };
     crossrefVerifiedPublisher?: boolean;
+    privateResearchRights?: boolean;
     providerStatus?: { active_provider: string; provider_ready: boolean; model: string | null; paid_calls_allowed: boolean };
   } = {},
 ) {
@@ -700,13 +701,39 @@ async function installApiFixtures(
         },
       }
     : activeSourceBase;
-  const activeSource = options.openAlexContentAvailability
+  const sourceWithAvailability = options.openAlexContentAvailability
     ? {
         ...sourceWithOrganization,
         provider: 'OpenAlex',
         openalex_fulltext_availability: options.openAlexContentAvailability,
       }
     : sourceWithOrganization;
+  const activeSource = options.privateResearchRights
+    ? {
+        ...sourceWithAvailability,
+        retrieval: {
+          ...sourceWithAvailability.retrieval,
+          rights_assessment: {
+            discovery: 'PERMITTED_METADATA',
+            access: 'PERMITTED',
+            analysis: 'PERMITTED_WITH_LIMITATIONS',
+            retention: 'LIMITED_EXCERPTS',
+            sharing: 'CITATION_ONLY',
+            basis: 'india_private_research_exception_candidate',
+            policy_version: 'private-research-v1',
+            legal_review_required: false,
+            max_retained_verbatim_characters: 1200,
+            max_retained_passages: 4,
+            robots_status: 'rules_checked',
+            site_terms_status: 'checked_no_restriction_signal',
+            verified_domains: ['example.org'],
+            terms_url: 'https://example.org/terms',
+            reason_codes: ['private_research_exception_candidate'],
+            warnings: ['This is not a legal opinion or redistribution grant.'],
+          },
+        },
+      }
+    : sourceWithAvailability;
   const projectListRequestCounter = { count: 0 };
   let currentProject = project;
   let retentionDays: 30 | 90 | 365 | null = null;
@@ -1173,6 +1200,21 @@ test('source inspector preserves Crossref identity evidence without labeling it 
   );
   await expect(inspector.getByText(/Identity evidence supports the listed organization\/domain or publisher-publication relationship only/)).toBeVisible();
   await expect(inspector.getByText('Publication rights', { exact: true })).toBeVisible();
+});
+
+test('source inspector separates private research analysis from sharing rights', async ({ page }) => {
+  await openReport(page, { fullTextEvidence: true, privateResearchRights: true });
+  await page.getByRole('button', { name: 'Open source S1' }).click();
+  const inspector = page.locator('.evidence-drawer');
+  await expect(inspector.getByText('PERMITTED_WITH_LIMITATIONS', { exact: true })).toBeVisible();
+  await expect(inspector.getByText('LIMITED_EXCERPTS · at most 4 passages / 1200 characters')).toBeVisible();
+  await expect(inspector.getByText('CITATION_ONLY', { exact: true })).toBeVisible();
+  await expect(inspector.getByText('This is not a legal opinion or redistribution grant.')).toBeVisible();
+  await expect(inspector.getByRole('link', { name: 'Open terms' })).toHaveAttribute(
+    'href',
+    'https://example.org/terms',
+  );
+  await expect(inspector.getByText(source.passages[0].content, { exact: true })).toBeVisible();
 });
 
 test('model-authored synthesis is labeled separately from a preliminary evidence map', async ({ page }) => {

@@ -266,6 +266,7 @@ def test_verified_publication_page_returns_only_page_metadata_and_honors_robots(
                 '<link rel="license" href="https://creativecommons.org/licenses/by/4.0/">'
                 '<meta name="citation_title" content="Food security policy evidence">'
                 '<meta name="citation_publication_date" content="2025-08-12">'
+                '<a href="/reports/food-security.pdf">Download report</a>'
                 "</head><body>Full text must not be returned or persisted.</body></html>"
             ),
         )
@@ -295,7 +296,139 @@ def test_verified_publication_page_returns_only_page_metadata_and_honors_robots(
     assert result.license_code == "cc-by"
     assert result.license_url == "https://creativecommons.org/licenses/by/4.0/"
     assert result.license_evidence == "official_page_rel_license"
+    assert result.linked_pdf_url == "https://fao.example/reports/food-security.pdf"
     assert not hasattr(result, "body")
+
+
+def test_publication_page_records_item_rights_signals_without_retaining_notice_text():
+    def handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/plain"},
+                text="User-agent: *\nAllow: /",
+            )
+        if request.url.path in {"/terms", "/terms-of-use"}:
+            return httpx.Response(404, headers={"content-type": "text/html"})
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            text=(
+                "<html><head><title>Urban climate assessment</title>"
+                '<link rel="canonical" href="https://fao.example/reports/urban-climate">'
+                '<meta name="citation_title" content="Urban climate assessment">'
+                "</head><body><p>No part of this report may be reproduced without permission.</p>"
+                "<p>Copyright 2025 Institute.</p></body></html>"
+            ),
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
+    provider = WordPressPublicationSearchProvider(
+        client=client, public_resolver=lambda *_args: ["8.8.8.8"]
+    )
+    try:
+        result = provider.verify_publication_page(
+            _organization_for_metadata_verification(),
+            "https://fao.example/reports/urban-climate",
+            expected_title="Urban climate assessment",
+        )
+    finally:
+        provider.close()
+        client.close()
+
+    assert result.item_specific_restriction_codes == ("item_specific_reproduction_restriction",)
+    assert result.copyright_notice_detected is True
+    assert not hasattr(result, "body")
+
+
+def test_unlicensed_publication_checks_linked_terms_without_retaining_terms_text():
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        if request.url.path == "/robots.txt":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/plain"},
+                text="User-agent: *\nAllow: /",
+            )
+        if request.url.path == "/reports/food-security":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                text=(
+                    "<html><head><title>Food security policy evidence</title>"
+                    '<meta name="citation_title" content="Food security policy evidence">'
+                    '<link rel="canonical" href="https://fao.example/reports/food-security">'
+                    '</head><body><a href="/legal/terms">Terms of Use</a>'
+                    "Publication body must not be retained.</body></html>"
+                ),
+            )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text=(
+                "Terms prohibit automated scraping and text and data mining. "
+                "Terms body must not be retained."
+            ),
+        )
+
+    provider = WordPressPublicationSearchProvider(
+        client=httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False),
+        public_resolver=lambda *_args: ["8.8.8.8"],
+    )
+    try:
+        result = provider.verify_publication_page(
+            _organization_for_metadata_verification(),
+            "https://fao.example/reports/food-security",
+            expected_title="Food security policy evidence",
+        )
+    finally:
+        provider.close()
+
+    assert requests == ["/robots.txt", "/reports/food-security", "/legal/terms"]
+    assert result.license_status == "not_declared"
+    assert result.site_terms_status == "restriction_signal"
+    assert result.site_terms_url == "https://fao.example/legal/terms"
+    assert result.site_terms_restriction_codes == ("automated_access", "text_data_mining")
+    assert result.site_terms_sha256 is not None
+    assert result.request_count == 3
+    assert not hasattr(result, "site_terms_text")
+
+
+def test_robots_403_is_unavailable_but_document_403_remains_denied():
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        if request.url.path == "/robots.txt":
+            return httpx.Response(403, text="not available")
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text=(
+                "<html><head><title>Food security policy evidence</title>"
+                '<meta name="citation_title" content="Food security policy evidence">'
+                '<link rel="canonical" href="https://fao.example/reports/food-security">'
+                "</head></html>"
+            ),
+        )
+
+    provider = WordPressPublicationSearchProvider(
+        client=httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False),
+        public_resolver=lambda *_args: ["8.8.8.8"],
+    )
+    try:
+        result = provider.verify_publication_page(
+            _organization_for_metadata_verification(),
+            "https://fao.example/reports/food-security",
+            expected_title="Food security policy evidence",
+        )
+    finally:
+        provider.close()
+    assert result.robots_status == "unavailable_4xx"
+    assert result.robots_http_status == 403
+    assert requests[:2] == ["/robots.txt", "/reports/food-security"]
 
 
 def test_publication_page_license_parser_fails_closed_for_unknown_or_conflicting_rights():
@@ -406,8 +539,11 @@ def test_verified_publication_page_preserves_terminal_http_failure_class(
 
     assert raised.value.code == expected_code
     assert raised.value.request_dispatched is True
-    assert raised.value.requests_attempted == 1
-    assert requested_paths == ["/robots.txt"]
+    expected_paths = (
+        ["/robots.txt", "/reports/food-security"] if status_code in {401, 403} else ["/robots.txt"]
+    )
+    assert raised.value.requests_attempted == len(expected_paths)
+    assert requested_paths == expected_paths
 
 
 @pytest.mark.parametrize(

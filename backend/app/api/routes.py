@@ -870,6 +870,87 @@ def _report_out(report: ResearchReport) -> dict[str, Any]:
     }
 
 
+def _source_is_citation_only(source: Source) -> bool:
+    metadata = source.metadata_json if isinstance(source.metadata_json, dict) else {}
+    retrieval = metadata.get("retrieval")
+    rights = retrieval.get("rights_assessment") if isinstance(retrieval, dict) else None
+    return isinstance(rights, dict) and rights.get("sharing") == "CITATION_ONLY"
+
+
+def _claim_ids_include_citation_only_source(db: Session, claim_ids: list[str]) -> bool:
+    ids = {value for value in claim_ids if isinstance(value, str) and value}
+    if not ids:
+        return False
+    cache = db.info.setdefault("citation_only_claim_export", {})
+    pending = ids - cache.keys()
+    if pending:
+        claims = list(
+            db.scalars(
+                select(Claim)
+                .options(selectinload(Claim.passage).selectinload(Passage.source))
+                .where(Claim.id.in_(pending))
+            )
+        )
+        for claim in claims:
+            cache[claim.id] = bool(
+                claim.passage is None or _source_is_citation_only(claim.passage.source)
+            )
+        for missing_id in pending - cache.keys():
+            cache[missing_id] = True
+    return any(cache[claim_id] for claim_id in ids)
+
+
+def _report_out_for_export(report: ResearchReport) -> dict[str, Any]:
+    result = _report_out(report)
+    job = report.job
+    if job is None:
+        return result
+    citation_only_sources = {
+        source.id
+        for source in job.sources
+        if _source_is_citation_only(source) and bool(source.passages)
+    }
+    if not citation_only_sources:
+        return result
+    citation_map = result.get("citation_map")
+    citation_entries = list(citation_map.values()) if isinstance(citation_map, dict) else []
+    cited_source_ids: set[str] = set()
+    citation_provenance_incomplete = not citation_entries
+    for citation in citation_entries:
+        source_id = citation.get("source_id") if isinstance(citation, dict) else None
+        if isinstance(source_id, str) and source_id:
+            cited_source_ids.add(source_id)
+        else:
+            citation_provenance_incomplete = True
+    if not citation_provenance_incomplete and not citation_only_sources.intersection(
+        cited_source_ids
+    ):
+        return result
+    citation_lines = []
+    for label, citation in result["citation_map"].items():
+        if not isinstance(citation, dict):
+            continue
+        title = citation.get("title")
+        location = citation.get("doi") or citation.get("url")
+        if isinstance(title, str) and title.strip():
+            citation_lines.append(
+                f"- [{label}] {title.strip()}"
+                + (f" - {location}" if isinstance(location, str) and location else "")
+            )
+    result["body_markdown"] = (
+        "# Report text withheld from export\n\n"
+        "This report includes evidence retained under a private-research policy whose sharing "
+        "scope is citation-only. The report remains inspectable in Veda for the configured "
+        "private research use; this export contains bibliographic citations only and does not "
+        "grant redistribution rights.\n\n## Bibliographic citations\n\n"
+        + ("\n".join(citation_lines) if citation_lines else "No citation metadata is available.")
+    )
+    result["evidence_content_withheld"] = True
+    result["content_withheld_reason"] = "source_sharing_citation_only"
+    result["verification"] = _report_verification_without_source_text(result["verification"])
+    return result
+
+
 def _owned_project(
     db: Session,
     project_id: str,
@@ -1265,39 +1346,61 @@ def export_account_data(
                 first = False
                 exported_record = _export_row(record)
                 if isinstance(record, Source):
-                    if not abstract_text_reuse_permitted(record, record.abstract_excerpt):
+                    citation_only = _source_is_citation_only(record)
+                    if citation_only or not abstract_text_reuse_permitted(
+                        record, record.abstract_excerpt
+                    ):
                         exported_record["abstract_excerpt"] = None
                         metadata = dict(exported_record.get("metadata_json") or {})
-                        metadata.setdefault("abstract_text_retention_status", "legacy_not_recorded")
+                        metadata.setdefault(
+                            "abstract_text_retention_status",
+                            "not_exported_citation_only"
+                            if citation_only
+                            else "legacy_not_recorded",
+                        )
                         exported_record["metadata_json"] = metadata
                     exported_record["appraisal_json"] = _redact_export_value(
                         source_appraisal_for_api(
                             record.appraisal_json
-                            if not record.abstract_excerpt
-                            or abstract_text_reuse_permitted(record, record.abstract_excerpt)
+                            if not citation_only
+                            and (
+                                not record.abstract_excerpt
+                                or abstract_text_reuse_permitted(record, record.abstract_excerpt)
+                            )
                             else {}
                         )
                     )
                 elif isinstance(record, Passage):
-                    if record.access_level in {"abstract_only", "abstract_excerpt"} and not (
-                        passage_abstract_text_reuse_permitted(record)
+                    if _source_is_citation_only(record.source) or (
+                        record.access_level in {"abstract_only", "abstract_excerpt"}
+                        and not passage_abstract_text_reuse_permitted(record)
                     ):
                         exported_record["content"] = WITHHELD_ABSTRACT_TEXT
                         exported_record["content_withheld_reason"] = (
-                            "item_version_reuse_rights_not_recorded"
+                            "source_sharing_citation_only"
+                            if _source_is_citation_only(record.source)
+                            else "item_version_reuse_rights_not_recorded"
                         )
                 elif isinstance(record, Claim):
-                    if (
+                    citation_only = bool(
+                        record.passage and _source_is_citation_only(record.passage.source)
+                    )
+                    abstract_text_unverified = bool(
                         record.passage
                         and record.passage.access_level in {"abstract_only", "abstract_excerpt"}
-                        and not (passage_abstract_text_reuse_permitted(record.passage))
-                    ):
+                        and not passage_abstract_text_reuse_permitted(record.passage)
+                    )
+                    if citation_only or abstract_text_unverified:
                         exported_record.update(
                             text=WITHHELD_CLAIM_TEXT,
                             span_start=None,
                             span_end=None,
                             atomization_status="text_withheld_pending_rights_review",
-                            text_withheld_reason="item_version_reuse_rights_not_recorded",
+                            text_withheld_reason=(
+                                "source_sharing_citation_only"
+                                if citation_only
+                                else "item_version_reuse_rights_not_recorded"
+                            ),
                         )
                         exported_record["appraisal_json"] = claim_appraisal_for_api({})
                     else:
@@ -1306,13 +1409,39 @@ def export_account_data(
                         )
                 elif isinstance(record, EvidenceRelationship):
                     exported_record.update(_redact_export_value(_relationship_out(record, db)))
+                    if _claim_ids_include_citation_only_source(
+                        db, [record.claim_a_id, record.claim_b_id]
+                    ):
+                        exported_record.update(
+                            rationale=WITHHELD_COMPARISON_TEXT,
+                            scope_differences_json=[],
+                            evidence_json=[],
+                            text_withheld_reason="source_sharing_citation_only",
+                        )
                 elif isinstance(record, Hypothesis):
                     exported_record.update(_redact_export_value(_hypothesis_out(record, db)))
+                    evidence = (
+                        record.evidence_json if isinstance(record.evidence_json, list) else []
+                    )
+                    claim_ids = [
+                        item.get("claim_id") for item in evidence if isinstance(item, dict)
+                    ]
+                    if _claim_ids_include_citation_only_source(db, claim_ids):
+                        exported_record.update(
+                            statement=WITHHELD_HYPOTHESIS_TEXT,
+                            uncertainty=WITHHELD_HYPOTHESIS_TEXT,
+                            why_competing=WITHHELD_HYPOTHESIS_TEXT,
+                            evidence_json=[],
+                            text_withheld_reason="source_sharing_citation_only",
+                        )
                 elif isinstance(record, ResearchReport):
-                    api_report = _report_out(record)
+                    api_report = _report_out_for_export(record)
                     exported_record["body_markdown"] = api_report["body_markdown"]
                     exported_record["evidence_content_withheld"] = api_report[
                         "evidence_content_withheld"
+                    ]
+                    exported_record["content_withheld_reason"] = api_report[
+                        "content_withheld_reason"
                     ]
                     exported_record["citation_map_json"] = _redact_export_value(
                         versioned_report_citation_map(record.citation_map_json)
@@ -3033,12 +3162,14 @@ def export_report(
         raise HTTPException(status_code=404, detail="Report not found")
     if format == "json":
         return Response(
-            content=__import__("json").dumps(_report_out(report), default=str, ensure_ascii=False),
+            content=__import__("json").dumps(
+                _report_out_for_export(report), default=str, ensure_ascii=False
+            ),
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="veda-report-{report.id}.json"'},
         )
     return Response(
-        content=_report_out(report)["body_markdown"],
+        content=_report_out_for_export(report)["body_markdown"],
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="veda-report-{report.id}.md"'},
     )

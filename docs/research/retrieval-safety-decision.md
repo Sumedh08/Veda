@@ -41,3 +41,20 @@ The scholarly APIs continue to use HTTPX with ordinary provider URLs. The source
 - [pypdf `PdfReader` documentation](https://pypdf.readthedocs.io/en/stable/modules/PdfReader.html) — strict parsing, page text extraction, and reader behavior.
 - [pypdf configuration documentation](https://pypdf.readthedocs.io/en/latest/modules/configuration.html) — scoped parser resource limits used by Veda.
 - [pypdf license](https://github.com/py-pdf/pypdf/blob/main/LICENSE) and [package metadata](https://github.com/py-pdf/pypdf/blob/main/pyproject.toml) — BSD 3-Clause; dependency declared as `pypdf>=6.21.4,<7` and locally exercised at 6.21.4.
+
+## 2026-11-02 addendum: separate private analysis from redistribution
+
+The original CC-BY/CC0 plus exact-host registry described above is a conservative product policy, not a statement that copyright law always requires a Creative Commons license before private research access or analysis. It remains unchanged for its existing scholarly routes. A separate configured private-research path now applies to verified official HTML publications whose item license is not stated, subject to the requirements and limits in [ADR-0052](../architecture/ADR-0052-separate-private-research-processing-and-sharing.md).
+
+The policy records distinct discovery, access, analysis, text retention, and sharing values. `RIGHTS_JURISDICTION` is blank by default; an unconfigured or unsupported jurisdiction remains metadata-only/review-required. The India profile is an operational statutory-exception candidate for a verified research work and private research use, not a legal opinion or universal authorization. It does not cover commercial or public-sharing use, software, explicit item/source restriction signals, direct document 401/403, or unresolved identity/terms. Where applied, at most four passages / 1,200 verbatim characters are retained, and sharing remains citation-only. The private workspace can inspect its evidence, while report and account-data exports withhold that source text and source-derived report text but retain bibliographic citation metadata.
+
+The publication page metadata response is bounded and discarded after extracting identity metadata, item-level license declarations, a safe same-domain PDF link, and restriction signals; terms-page text is not retained, only its URL, hash and detected signal codes. This is a small automated screen, not a complete interpretation of every publisher's terms or document copyright statement. A signal or inaccessible terms page requires review. A missing terms page is recorded as `not_found`, not permission. No LLM makes the rights decision.
+
+Robots-file outcomes are now distinguished per RFC 9309: a robots 4xx is recorded as “unavailable” and may permit the crawler to continue to an otherwise publicly accessible document; an explicit disallow blocks it; 5xx or network-unreachable rules fail closed. A direct document HTTP 401/403 remains an access denial. Robots status is not copyright permission or site-terms permission. No blocked source is retried through another fetch mode.
+
+This is locally implemented and fixture-tested; no new unlicensed live document was acquired. The WIDER page whose robots endpoint returned 403 was not retried. See ADR-0052 and the current T-140 entry in `evaluation/RESULTS.md` for exact tests and remaining live validation.
+
+Legal sources reviewed for the narrow policy statement:
+
+- [Indian Copyright Act, Chapter XI, section 52](https://copyright.gov.in/Copyright_Act_1957/chapter_xi.html) includes specified fair-dealing purposes such as private or personal use including research; applicability to a particular source, access method, contract, amount, retention or downstream use is not resolved by this code.
+- [IETF RFC 9309](https://www.rfc-editor.org/rfc/rfc9309.html) distinguishes robots 4xx unavailable from 5xx/network unreachable and states robots rules do not authorize copyright use.

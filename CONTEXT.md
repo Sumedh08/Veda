@@ -30,6 +30,9 @@ The versioned record of whether an optional official-statistics provider applied
 **Evidence snapshot**:
 A versioned description of the exact document or bounded provider excerpt from which a passage was captured.
 
+**Rights decision**:
+A versioned, evidence-backed set of separate decisions for source metadata discovery, automated access, research analysis, text retention, and sharing. A private-research decision may allow bounded internal analysis and excerpts while limiting sharing to bibliographic citations; it is not a legal opinion or a public redistribution license.
+
 **Source-reported claim**:
 A short, exact statement linked to a stored passage. It records what the source says; it does not establish that the statement is true.
 

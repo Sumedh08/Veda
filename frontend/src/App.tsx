@@ -1229,6 +1229,15 @@ function RetrievalPolicyDetails({ retrieval }: { retrieval: NonNullable<Source['
     {retrieval.license_evidence && <div><span>License evidence</span><b>{retrieval.license_evidence}</b></div>}
     {retrieval.rights_decision && <div><span>Content rights decision</span><b>{retrieval.rights_decision.replace(/_/g, ' ')}</b></div>}
     {retrieval.rights_basis && <div><span>Rights basis</span><b>{retrieval.rights_basis}</b></div>}
+    {retrieval.rights_assessment && <>
+      <div><span>Discovery / metadata</span><b>{retrieval.rights_assessment.discovery || 'Not assessed'}</b></div>
+      <div><span>Document access</span><b>{retrieval.rights_assessment.access || 'Not assessed'} · robots {retrieval.rights_assessment.robots_status || 'not checked'}</b></div>
+      <div><span>Research analysis</span><b>{retrieval.rights_assessment.analysis || 'Not assessed'}</b></div>
+      <div><span>Text retention</span><b>{retrieval.rights_assessment.retention || 'Not assessed'}{retrieval.rights_assessment.max_retained_passages != null ? ` · at most ${retrieval.rights_assessment.max_retained_passages} passages / ${retrieval.rights_assessment.max_retained_verbatim_characters ?? 0} characters` : ''}</b></div>
+      <div><span>Sharing / redistribution</span><b>{retrieval.rights_assessment.sharing || 'Not assessed'}</b></div>
+      {retrieval.rights_assessment.terms_url && <div><span>Checked site terms</span><a href={retrieval.rights_assessment.terms_url} target="_blank" rel="noreferrer">Open terms<ExternalLink size={12} /></a></div>}
+      {retrieval.rights_assessment.warnings?.map((warning) => <small className="drawer-footnote" key={warning}>{warning}</small>)}
+    </>}
     {retrieval.official_page_content && <div><span>Official page extraction</span><b>{retrieval.official_page_content.status || 'Not recorded'}{retrieval.official_page_content.reason_code ? ` · ${retrieval.official_page_content.reason_code.replace(/_/g, ' ')}` : ''} · rights {retrieval.official_page_content.rights_status || 'not assessed'} · retained {retrieval.official_page_content.content_retained ? 'yes' : 'no'}</b></div>}
     {retrieval.openaire_resolution && <div className="institutional-publication-details">
       <span>OpenAIRE repository resolution</span>
@@ -1267,10 +1276,15 @@ function SourceDrawer({ source, onClose }: { source: Source; onClose: () => void
   const appraisal = source.source_type === 'official_statistics' ? 'Not applicable: descriptive series, not a study' : source.appraisal?.status === 'model_assessed_not_independently_verified' ? 'Model-assisted; not independently verified' : 'Not performed';
   const retrieval = source.retrieval || {};
   const documentHash = retrieval.document_sha256;
+  const privateResearchPolicy = retrieval.rights_assessment?.basis === 'india_private_research_exception_candidate';
   const accessDescription = source.retrieval_status === 'full_text_html'
-    ? 'Bounded excerpts from HTML retrieved under a reported license assertion and reviewed host policy; the raw document is not retained.'
+    ? privateResearchPolicy
+      ? 'Limited exact excerpts from publicly accessible HTML under Veda’s configured private-research policy candidate. No redistribution permission is recorded; raw HTML is not retained.'
+      : 'Bounded excerpts from HTML retrieved under a reported license assertion and reviewed host policy; the raw document is not retained.'
     : source.retrieval_status === 'full_text_pdf'
-      ? retrieval.structured_document?.parser_name === 'grobid'
+      ? privateResearchPolicy
+        ? 'Limited exact excerpts from a public PDF under Veda’s configured private-research policy candidate. No redistribution permission is recorded; the raw PDF is not retained.'
+        : retrieval.structured_document?.parser_name === 'grobid'
         ? 'Section-aware TEI passages parsed from a PDF under a reported license assertion and reviewed host policy; the original PDF and returned TEI are not retained, and OCR is not performed.'
         : 'Bounded embedded-text passages from a PDF retrieved under a reported license assertion and reviewed host policy; the raw document is not retained and OCR is not performed.'
       : source.retrieval_status === 'full_text_jats'

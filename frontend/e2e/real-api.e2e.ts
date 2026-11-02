@@ -830,6 +830,13 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
       || blockedOfficialPageDomain.endsWith(`.${organization.official_domain}`),
     )
     : undefined;
+  const blockedPageMetadataFallback = generalWebDiscovery?.verified_official_publications.find(
+    (publication) => publication.selected
+      && publication.organization_id === blockedOfficialPageOrganization?.organization_id
+      && publication.source_id
+      && publication.publisher_verification === 'verified'
+      && publication.rights_status === 'metadata_only_not_assessed',
+  );
   if (crawl4aiLiveMode) {
     expect(generalWebDiscovery).toBeTruthy();
     expect(generalWebDiscovery?.preflight_status).toBe('reported');
@@ -864,21 +871,16 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
         blockedOfficialPageMetadataAttempt,
         'a denied page must be recorded as a terminal access restriction, not as a missing success',
       ).toBeTruthy();
-      expect(blockedOfficialPageMetadataAttempt?.request_count).toBeGreaterThan(0);
+      // The provider checks robots.txt first and must stop before requesting
+      // the publication page when the site's policy endpoint denies access.
+      expect(blockedOfficialPageMetadataAttempt?.request_count).toBe(1);
       expect(blockedOfficialPageMetadataAttempt?.body_retained).toBe(false);
       expect(blockedOfficialPageMetadataAttempt?.search_title.toLowerCase()).toContain('food price');
       expect(new URL(blockedOfficialPageMetadataAttempt!.official_url).pathname).toContain('/publication/');
       expect(blockedOfficialPageOrganization).toBeTruthy();
-      const metadataOnlyFallback = generalWebDiscovery?.verified_official_publications.find(
-        (publication) => publication.selected
-          && publication.organization_id === blockedOfficialPageOrganization?.organization_id
-          && publication.source_id
-          && publication.publisher_verification === 'verified'
-          && publication.rights_status === 'metadata_only_not_assessed',
-      );
-      expect(metadataOnlyFallback, 'a separately verified publication should remain reportable').toBeTruthy();
+      expect(blockedPageMetadataFallback, 'a separately verified publication should remain reportable').toBeTruthy();
       expect(Object.values(report.citation_map).some((citation) =>
-        citation.source_id === metadataOnlyFallback?.source_id,
+        citation.source_id === blockedPageMetadataFallback?.source_id,
       )).toBe(true);
     }
   }
@@ -1151,16 +1153,9 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
     await expect(pageMetadataInspector).not.toContainText('Passages in evidence ledger');
     await pageMetadataInspector.getByRole('button', { name: 'Close source inspector' }).click();
   } else if (requireOfficialPageMetadata && blockedOfficialPageMetadataAttempt) {
-    const metadataOnlyFallback = generalWebDiscovery?.verified_official_publications.find(
-      (publication) => publication.selected
-        && publication.organization_id === blockedOfficialPageOrganization?.organization_id
-        && publication.source_id
-        && publication.publisher_verification === 'verified'
-        && publication.rights_status === 'metadata_only_not_assessed',
-    );
-    expect(metadataOnlyFallback).toBeTruthy();
+    expect(blockedPageMetadataFallback).toBeTruthy();
     await page.getByRole('button', {
-      name: `Inspect organization-discovered publication ${metadataOnlyFallback!.title}`,
+      name: `Inspect organization-discovered publication ${blockedPageMetadataFallback!.title}`,
     }).click();
     const metadataOnlyInspector = page.locator('.evidence-drawer');
     await expect(metadataOnlyInspector).toContainText('Organization discovery provenance');

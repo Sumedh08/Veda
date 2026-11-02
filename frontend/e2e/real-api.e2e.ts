@@ -766,6 +766,7 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
       semantic_support_check: string;
       citation_link_integrity: { status: string };
       search_coverage: {
+        source_governance?: { planned_classes: string[] };
         selected_sources: number;
         candidate_ledger_records: number;
         provider_query_counts: Record<string, number>;
@@ -1036,8 +1037,14 @@ test('live scholarly/model smoke completes a bounded Veda browser run', async ({
       rights_status: 'not_assessed',
     });
   }
+  const governmentClassPlanned =
+    report.verification.search_coverage.source_governance?.planned_classes.includes('government') ?? false;
   expect(report.verification.search_coverage.government_publication_search).toMatchObject({
-    status: govukLiveMode ? 'completed' : 'not_applicable_explicit_uk_geography_required',
+    status: govukLiveMode
+      ? 'completed'
+      : governmentClassPlanned
+        ? 'not_applicable_explicit_uk_geography_required'
+        : 'not_planned',
     provider: 'GOV.UK Search API',
     geography: govukLiveMode ? 'United Kingdom' : null,
     request_dispatched: govukLiveMode,

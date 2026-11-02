@@ -185,7 +185,7 @@ def test_sarvam_transmits_report_sentence_and_length_constraints(monkeypatch):
                 "message": {
                     "content": json.dumps(
                         {
-                            "schema_version": 3,
+                            "schema_version": 4,
                             "findings": [],
                             "qualifications": [],
                             "decision_implications": [],
@@ -206,7 +206,7 @@ def test_sarvam_transmits_report_sentence_and_length_constraints(monkeypatch):
     provider = SarvamChatCompletionsProvider(httpx.Client(transport=httpx.MockTransport(handler)))
     try:
         provider.complete_json(
-            schema_name="veda_report_draft_v3",
+            schema_name="veda_report_draft_v4",
             schema_model=ResearchReportDraft,
             system="Return a concise report draft.",
             user="Use only supplied claim evidence.",

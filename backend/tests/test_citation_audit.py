@@ -104,14 +104,18 @@ def test_report_pipeline_runs_separate_semantic_and_deterministic_checks(client,
 
     def call_structured(_db, _job, *, schema_name, **_kwargs):
         schemas.append(schema_name)
-        if schema_name == "veda_report_draft_v3":
+        if schema_name == "veda_report_draft_v4":
+            report_payload = json.loads(_kwargs["user"])
+            assert report_payload["material_evidence_requirements"][0]["requirement_id"] == "Q1"
+            assert report_payload["material_evidence_requirements"][0]["text"]
             value = ResearchReportDraft(
-                schema_version=3,
+                schema_version=4,
                 findings=[
                     ReportFinding(
                         heading="Reported outcome",
                         statement="The study reports a 10 percent improvement in the measured outcome.",
                         claim_ids=[seeded["claim_id"]],
+                        requirement_ids=["Q1", "Q99"],
                     )
                 ],
                 qualifications=[],
@@ -123,6 +127,7 @@ def test_report_pipeline_runs_separate_semantic_and_deterministic_checks(client,
                         assumptions=["The abstract may omit relevant subgroup results."],
                         unknowns=["Local implementation costs are not stated."],
                         claim_ids=[seeded["claim_id"]],
+                        requirement_ids=["Q1"],
                     ),
                     DecisionImplicationDraft(
                         action="scale",
@@ -170,7 +175,7 @@ def test_report_pipeline_runs_separate_semantic_and_deterministic_checks(client,
         report, _, _ = workflow._build_model_report(db, seeded["job"], seeded["citation_map"])
 
     body, _citation_map, verification, model_name = report
-    assert schemas == ["veda_report_draft_v3", "veda_semantic_report_audit_v1"]
+    assert schemas == ["veda_report_draft_v4", "veda_semantic_report_audit_v1"]
     assert model_name == "fixture/free"
     assert verification["finding_to_claim_links"] == "deterministic_checked"
     assert (
@@ -179,6 +184,8 @@ def test_report_pipeline_runs_separate_semantic_and_deterministic_checks(client,
     )
     assert verification["uncited_material_claim_scan"] == "performed_model_assisted_not_guaranteed"
     assert verification["semantic_audit_items"][0]["passage_ids"] == [seeded["passage_id"]]
+    assert verification["semantic_audit_items"][0]["requirement_ids"] == ["Q1"]
+    assert verification["invalid_material_requirement_mappings"] == 1
     assert [item["kind"] for item in verification["semantic_audit_items"]] == [
         "finding",
         "decision_implication",
@@ -318,10 +325,10 @@ def test_report_suppresses_conditional_implications_without_decision_objective(c
     monkeypatch.setattr(workflow, "_model_call_blocker", lambda *_args, **_kwargs: None)
 
     def call_structured(_db, _job, *, schema_name, **_kwargs):
-        if schema_name == "veda_report_draft_v3":
+        if schema_name == "veda_report_draft_v4":
             return (
                 ResearchReportDraft(
-                    schema_version=3,
+                    schema_version=4,
                     findings=[
                         ReportFinding(
                             heading="Reported outcome",

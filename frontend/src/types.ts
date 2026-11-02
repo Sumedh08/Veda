@@ -700,6 +700,33 @@ export type ResearchReport = {
       decision_timestamp: string;
       human_review_status: 'not_performed';
     };
+    evidence_sufficiency_v2?: {
+      schema_version: 1;
+      status: 'SUFFICIENT_FOR_SCOPE' | 'PRELIMINARY_EVIDENCE_MAP' | 'INSUFFICIENT_EVIDENCE';
+      covered_requirement_ids: string[];
+      uncovered_requirement_ids: string[];
+      blocking_conditions: string[];
+      question_plan: {
+        question_kind: string;
+        scope_breadth: string;
+        material_requirements: Array<{ requirement_id: string; text: string; purpose?: string }>;
+      };
+      independence: {
+        content_bearing_publication_groups: number;
+        independent_investigations_confirmed: number;
+        unknown_independence_publications: number;
+      };
+      material_requirement_evidence: Array<{
+        requirement_id: string;
+        linked_publication_identities: string[];
+        supporting_publication_identities: string[];
+        confirmed_independent_investigation_ids: string[];
+        independence_unknown_publication_identities: string[];
+        known_non_independent_publication_identities: string[];
+      }>;
+      human_review_status: 'not_performed';
+      scientific_validation_status: 'not_independently_validated';
+    };
     search_coverage?: {
       status?: string;
       discovery_completed_at_utc?: string | null;

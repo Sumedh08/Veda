@@ -1069,7 +1069,8 @@ function ReportPanel({ report, job, sources, claims, onSelectClaim, onSelectSour
     ? report.verification.decision_implications as Array<Record<string, unknown>> : [];
   const claimUnits = Array.isArray(report.verification.claim_units)
     ? report.verification.claim_units as Array<Record<string, unknown>> : [];
-  const evidenceSufficiency = report.verification.evidence_sufficiency_v1;
+  const adaptiveSufficiency = report.verification.evidence_sufficiency_v2;
+  const legacyEvidenceSufficiency = report.verification.evidence_sufficiency_v1;
   const claimById = new Map(claims.map((claim) => [claim.id, claim]));
   const semanticDone = semanticStatus !== 'NOT RUN';
   return <div className="report-layout">
@@ -1084,7 +1085,16 @@ function ReportPanel({ report, job, sources, claims, onSelectClaim, onSelectSour
     </section>
     <aside className="content-card audit-card">
       <p className="eyebrow">VERIFICATION</p><h3>What was checked</h3>
-      {evidenceSufficiency && <div className="audit-warning" role="status" aria-label="Evidence sufficiency status"><ShieldCheck size={15} /><span><b>Automated evidence status · {evidenceSufficiency.status.replace(/_/g, ' ')}</b><br />This policy result is not independent peer review. Human review: {evidenceSufficiency.human_review_status.replace(/_/g, ' ')}.{evidenceSufficiency.blocking_conditions.length > 0 && <><br /><small>Open conditions: {evidenceSufficiency.blocking_conditions.join('; ')}</small></>}</span></div>}
+      {adaptiveSufficiency ? <div className="audit-warning" role="status" aria-label="Question-adaptive evidence sufficiency"><ShieldCheck size={15} /><span><b>Question-adaptive evidence status · {adaptiveSufficiency.status.replace(/_/g, ' ')}</b><br />Requirements covered: {adaptiveSufficiency.covered_requirement_ids.length}/{adaptiveSufficiency.question_plan.material_requirements.length} · content-bearing publications: {adaptiveSufficiency.independence.content_bearing_publication_groups} · confirmed independent investigations: {adaptiveSufficiency.independence.independent_investigations_confirmed} · independence unknown: {adaptiveSufficiency.independence.unknown_independence_publications}.<br />This operational policy is not independent peer review or a scientifically validated universal standard. Human review: {adaptiveSufficiency.human_review_status.replace(/_/g, ' ')}.{adaptiveSufficiency.blocking_conditions.length > 0 && <><br /><small>Open conditions: {adaptiveSufficiency.blocking_conditions.join('; ')}</small></>}</span></div> : legacyEvidenceSufficiency && <div className="audit-warning" role="status" aria-label="Legacy evidence sufficiency status"><ShieldCheck size={15} /><span><b>Legacy automated evidence status · {legacyEvidenceSufficiency.status.replace(/_/g, ' ')}</b><br />This historical policy result is not independent peer review. Human review: {legacyEvidenceSufficiency.human_review_status.replace(/_/g, ' ')}.</span></div>}
+      {adaptiveSufficiency?.question_plan.material_requirements.map((requirement) => {
+        const evidence = adaptiveSufficiency.material_requirement_evidence?.find((item) => item.requirement_id === requirement.requirement_id);
+        return <div className="audit-detail-item" key={requirement.requirement_id} aria-label={`Evidence requirement ${requirement.requirement_id}`}>
+          <b>{requirement.requirement_id} · {adaptiveSufficiency.covered_requirement_ids.includes(requirement.requirement_id) ? 'SUPPORTED CLAIM LINKED' : 'UNCOVERED REQUIREMENT'}</b>
+          <p>{requirement.text}</p>
+          <small>{evidence?.linked_publication_identities.length || 0} linked publication group(s) · {evidence?.supporting_publication_identities.length || 0} with supported claim links · {evidence?.confirmed_independent_investigation_ids.length || 0} reviewed independent investigation(s) · {evidence?.independence_unknown_publication_identities.length || 0} with unknown independence.</small>
+        </div>;
+      })}
+      {adaptiveSufficiency && legacyEvidenceSufficiency && <details className="audit-detail"><summary>Legacy evidence sufficiency v1 (compatibility record)</summary><div className="audit-detail-item"><b>{legacyEvidenceSufficiency.status.replace(/_/g, ' ')}</b><p>This earlier policy remains in the saved report for historical comparison. The question-adaptive v2 status above is the current report-level assessment.</p><small>{legacyEvidenceSufficiency.blocking_conditions.join('; ') || 'No legacy blockers recorded.'}</small></div></details>}
       <div className="audit-status"><span className="audit-check"><Check size={14} /></span><span><b>Source links</b><small>Deterministic reference integrity</small></span><em>{String(report.verification.status || 'passed').toUpperCase()}</em></div>
       <div className={`audit-status ${semanticDone ? '' : 'off'}`}><span className={semanticDone ? 'audit-check' : 'audit-minus'}>{semanticDone ? <Check size={14} /> : <X size={13} />}</span><span><b>Passage support</b><small>Separate model-assisted semantic review</small></span><em>{semanticStatus}</em></div>
       <div className={`audit-status ${appraisalStatus === 'NOT RUN' ? 'off' : ''}`}><span className={appraisalStatus === 'NOT RUN' ? 'audit-minus' : 'audit-check'}>{appraisalStatus === 'NOT RUN' ? <X size={13} /> : <Check size={14} />}</span><span><b>Source appraisal</b><small>Model-assisted, unverified</small></span><em>{appraisalStatus}</em></div>

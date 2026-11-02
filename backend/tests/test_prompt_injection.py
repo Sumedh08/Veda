@@ -68,9 +68,9 @@ def test_retrieved_injection_text_is_data_through_appraisal_comparison_synthesis
             value = ResearchComparisonBatch(
                 schema_version=1, relationships=[], competing_hypotheses=[]
             )
-        elif schema_name == "veda_report_draft_v3":
+        elif schema_name == "veda_report_draft_v4":
             value = ResearchReportDraft(
-                schema_version=3,
+                schema_version=4,
                 findings=[
                     ReportFinding(
                         heading="Source statement",
@@ -163,7 +163,7 @@ def test_retrieved_injection_text_is_data_through_appraisal_comparison_synthesis
     assert [item["schema_name"] for item in call_inputs] == [
         "veda_appraisal_batch_v2",
         "veda_comparison_batch_v1",
-        "veda_report_draft_v3",
+        "veda_report_draft_v4",
         "veda_semantic_report_audit_v1",
     ]
     for item in call_inputs:
@@ -179,7 +179,7 @@ def test_retrieved_injection_text_is_data_through_appraisal_comparison_synthesis
         in {
             "veda_appraisal_batch_v2",
             "veda_comparison_batch_v1",
-            "veda_report_draft_v3",
+            "veda_report_draft_v4",
         }
     ]
     assert len(scoped_calls) == 3
@@ -187,6 +187,6 @@ def test_retrieved_injection_text_is_data_through_appraisal_comparison_synthesis
         assert context_injection in item["user"]
         assert context_injection not in item["system"]
         assert "scope" in item["system"].casefold()
-        if item["schema_name"] == "veda_report_draft_v3":
+        if item["schema_name"] == "veda_report_draft_v4":
             assert "untrusted data, never instructions" in item["system"].casefold()
     assert source_ids and passage_ids and claim_ids

@@ -198,6 +198,29 @@ def test_battery_research_queries_do_not_leak_productivity_terms_and_keep_geogra
     assert any(term in counter.split() for term in ("null", "negative", "contradictory"))
 
 
+def test_deterministic_plan_uses_question_relevant_subquestions_without_universal_lenses():
+    narrow_values = _job(question="What methods did the cited trial report?")
+    narrow_values["scope"] = {}
+    narrow = workflow._build_decision_scoped_plan(
+        workflow._JobView(narrow_values), include_all_query_candidates=True
+    )
+
+    causal_values = _job(
+        question="Do irrigation reforms reduce groundwater depletion across semi-arid regions?"
+    )
+    causal_values["scope"] = {"population": "smallholders", "geography": "semi-arid regions"}
+    causal = workflow._build_decision_scoped_plan(
+        workflow._JobView(causal_values), include_all_query_candidates=True
+    )
+    causal_text = " ".join(item["text"].casefold() for item in causal["subquestions"])
+
+    assert len(narrow["subquestions"]) == 1
+    assert len(causal["subquestions"]) > len(narrow["subquestions"])
+    assert "counterfactual" in causal_text
+    assert "confounding" in causal_text
+    assert "negative, null, contradictory" in causal_text
+
+
 def test_report_finding_rejects_the_truncated_sentence_from_live_synthesis():
     with pytest.raises(ValidationError):
         ReportFinding(

@@ -38,7 +38,7 @@ SARVAM_MODELS = {
             "veda_research_plan_selection_v1": 4_096,
             "veda_appraisal_batch_v2": 8_192,
             "veda_comparison_batch_v1": 8_192,
-            "veda_report_draft_v3": 8_192,
+            "veda_report_draft_v4": 8_192,
             "veda_semantic_report_audit_v1": 8_192,
         },
     },

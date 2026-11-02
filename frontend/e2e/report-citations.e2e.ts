@@ -323,6 +323,18 @@ const report = {
       skip_reason: null,
     },
     model_assisted_appraisal: 'not_performed',
+    evidence_sufficiency_v2: {
+      schema_version: 1,
+      status: 'PRELIMINARY_EVIDENCE_MAP',
+      covered_requirement_ids: ['Q1'],
+      uncovered_requirement_ids: [],
+      blocking_conditions: ['independent_corroboration_not_established'],
+      question_plan: { question_kind: 'descriptive', scope_breadth: 'bounded', material_requirements: [{ requirement_id: 'Q1', text: 'Describe measured productivity outcomes.' }] },
+      independence: { content_bearing_publication_groups: 1, independent_investigations_confirmed: 0, unknown_independence_publications: 1 },
+      material_requirement_evidence: [{ requirement_id: 'Q1', linked_publication_identities: ['doi:10.0000/example'], supporting_publication_identities: [], confirmed_independent_investigation_ids: [], independence_unknown_publication_identities: ['doi:10.0000/example'], known_non_independent_publication_identities: [] }],
+      human_review_status: 'not_performed',
+      scientific_validation_status: 'not_independently_validated',
+    },
     semantic_support_check: 'not_performed',
     uncited_material_claim_scan: 'not_performed',
     semantic_audit_items: [],
@@ -464,6 +476,7 @@ async function installApiFixtures(
     jatsFullText?: boolean;
     grobidFullText?: boolean;
     fullTextEvidence?: boolean;
+    omitAdaptiveRequirementEvidence?: boolean;
     openAlexContentAvailability?: { pdf?: boolean; grobid_xml?: boolean };
     crossrefVerifiedPublisher?: boolean;
     privateResearchRights?: boolean;
@@ -503,6 +516,9 @@ async function installApiFixtures(
         },
       }
     : reportBeforeModelLabel;
+  if (options.omitAdaptiveRequirementEvidence && displayedReport.verification.evidence_sufficiency_v2) {
+    delete displayedReport.verification.evidence_sufficiency_v2.material_requirement_evidence;
+  }
   const displayedResearchPlan = options.modelAssistedPlan
     ? {
         ...researchPlan,
@@ -1351,6 +1367,17 @@ test('source inspector exposes GROBID version and section-aware PDF passage', as
   await expect(drawer.getByText(/methods: Methods · Methods/i)).toBeVisible();
   await expect(drawer.getByText(/TEI Methods \[tei-section-0001\] paragraph 1 sentence 1/)).toBeVisible();
   await expect(drawer.getByText('Participants were randomized to the AI-assisted and control conditions.')).toBeVisible();
+});
+
+test('report verification uses question-adaptive sufficiency as the current status', async ({ page }) => {
+  await openJob(page, { fullTextEvidence: true, omitAdaptiveRequirementEvidence: true });
+  await expect(page.getByRole('tab', { name: /report/i })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('tab', { name: /report/i }).click();
+  await expect(page.locator('.report-reader')).toBeVisible();
+  const status = page.getByRole('status', { name: 'Question-adaptive evidence sufficiency' });
+  await expect(status).toContainText('PRELIMINARY EVIDENCE MAP');
+  await expect(status).toContainText('independent_corroboration_not_established');
+  await expect(status).toContainText('Human review: not performed');
 });
 
 test('versioned job scope and event metrics remain usable in the browser', async ({ page }) => {

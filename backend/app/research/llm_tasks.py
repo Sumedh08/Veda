@@ -159,6 +159,7 @@ class ReportFinding(BaseModel):
     heading: str = Field(min_length=1, max_length=80)
     statement: str = Field(min_length=1, max_length=239, pattern=r".*[.!?]$")
     claim_ids: list[str] = Field(min_length=1, max_length=8)
+    requirement_ids: list[str] = Field(default_factory=list, max_length=8)
 
     @field_validator("statement")
     @classmethod
@@ -174,6 +175,7 @@ class ReportQualification(BaseModel):
     model_config = ConfigDict(extra="forbid")
     statement: str = Field(min_length=1, max_length=219, pattern=r".*[.!?]$")
     claim_ids: list[str] = Field(min_length=1, max_length=8)
+    requirement_ids: list[str] = Field(default_factory=list, max_length=8)
 
     @field_validator("statement")
     @classmethod
@@ -204,13 +206,14 @@ class DecisionImplicationDraft(BaseModel):
     assumptions: list[ShortReportText] = Field(min_length=1, max_length=3)
     unknowns: list[ShortReportText] = Field(min_length=1, max_length=3)
     claim_ids: list[str] = Field(min_length=1, max_length=8)
+    requirement_ids: list[str] = Field(default_factory=list, max_length=8)
 
 
 class ResearchReportDraft(BaseModel):
     """Compact, evidence-linked synthesis contract; conclusions stay passage-grounded."""
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[3]
+    schema_version: Literal[4]
     findings: list[ReportFinding] = Field(max_length=5)
     qualifications: list[ReportQualification] = Field(max_length=4)
     decision_implications: list[DecisionImplicationDraft] = Field(max_length=2)

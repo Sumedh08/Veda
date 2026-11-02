@@ -25,16 +25,16 @@ from app.research.llm_tasks import (
 from app.research.safe_fetch import SafeHTMLDocument
 
 
-def test_report_draft_v3_enforces_compact_output_bounds():
+def test_report_draft_v4_enforces_compact_output_bounds():
     valid = {
-        "schema_version": 3,
+        "schema_version": 4,
         "findings": [],
         "qualifications": [],
         "decision_implications": [],
         "unanswered_questions": ["Which outcomes persist after follow-up?"],
         "company_specific_inputs": [],
     }
-    assert ResearchReportDraft.model_validate(valid).schema_version == 3
+    assert ResearchReportDraft.model_validate(valid).schema_version == 4
 
     overlong_text = {**valid, "unanswered_questions": ["x" * 181]}
     with pytest.raises(ValidationError):
@@ -155,9 +155,44 @@ class PipelineFixtureHTMLFetcher:
         )
 
 
+class PipelineFixtureOpenAIRE:
+    """Keep the end-to-end fixture deterministic and free of external metadata calls."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def search(self, *args, **kwargs):
+        return []
+
+    def search_organizations(self, *args, **kwargs):
+        return []
+
+    def close(self):
+        pass
+
+
+class PipelineFixtureROR:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def search_exact_id(self, *args, **kwargs):
+        return None
+
+    def search_exact_domain(self, *args, **kwargs):
+        return None
+
+    def verify(self, *args, **kwargs):
+        return None
+
+    def close(self):
+        pass
+
+
 def test_deterministic_provider_fixtures_complete_and_persist_ai_pipeline(client, monkeypatch):
     monkeypatch.setattr(workflow, "CrossrefProvider", PipelineFixtureCrossref)
     monkeypatch.setattr(workflow, "OpenAlexProvider", PipelineFixtureOpenAlex)
+    monkeypatch.setattr(workflow, "OpenAIREProvider", PipelineFixtureOpenAIRE)
+    monkeypatch.setattr(workflow, "RORProvider", PipelineFixtureROR)
     monkeypatch.setattr(workflow, "SafeHTMLFetcher", PipelineFixtureHTMLFetcher)
     monkeypatch.setattr(
         workflow,
@@ -253,7 +288,7 @@ def test_deterministic_provider_fixtures_complete_and_persist_ai_pipeline(client
                     usage=usage,
                 )
 
-            if operation == "veda_report_draft_v3":
+            if operation == "veda_report_draft_v4":
                 assert (
                     "an outcome absent from an abstract/metadata record is unknown"
                     in kwargs["system"].casefold()
@@ -263,6 +298,11 @@ def test_deterministic_provider_fixtures_complete_and_persist_ai_pipeline(client
                     in kwargs["system"].casefold()
                 )
                 evidence = submitted["evidence"]
+                assert submitted["material_evidence_requirements"]
+                assert all(
+                    requirement["requirement_id"].startswith("Q")
+                    for requirement in submitted["material_evidence_requirements"]
+                )
                 assert evidence["sources"] and evidence["claims"]
                 assert len(evidence["claims"]) > 1
                 source_by_id = {source["source_id"]: source for source in evidence["sources"]}
@@ -295,12 +335,13 @@ def test_deterministic_provider_fixtures_complete_and_persist_ai_pipeline(client
                 )
                 return SimpleNamespace(
                     value=ResearchReportDraft(
-                        schema_version=3,
+                        schema_version=4,
                         findings=[
                             {
                                 "heading": "Source-reported result",
                                 "statement": first_claim.get("claim_text", first_passage["text"]),
                                 "claim_ids": [first_claim["claim_id"]],
+                                "requirement_ids": ["Q1"],
                             },
                             {
                                 "heading": "Unsupported absence claim",
@@ -383,7 +424,7 @@ def test_deterministic_provider_fixtures_complete_and_persist_ai_pipeline(client
         "veda_research_plan_selection_v1",
         "veda_appraisal_batch_v2",
         "veda_comparison_batch_v1",
-        "veda_report_draft_v3",
+        "veda_report_draft_v4",
         "veda_semantic_report_audit_v1",
     ]
 
@@ -411,6 +452,10 @@ def test_deterministic_provider_fixtures_complete_and_persist_ai_pipeline(client
     )
     assert report["citation_map"]
     assert report["body_markdown"]
+    assert report["verification"]["semantic_audit_items"][0]["requirement_ids"] == ["Q1"]
+    assert report["verification"]["evidence_sufficiency_v2"]["status"] == (
+        "PRELIMINARY_EVIDENCE_MAP"
+    )
     assert "did not measure productivity outcomes" not in report["body_markdown"]
     assert report["verification"]["measurement_absence_guard_v1"]["rejected_findings"] == 1
 

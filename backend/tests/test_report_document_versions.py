@@ -207,7 +207,8 @@ def test_model_assisted_workflow_report_uses_envelopes_at_storage_and_api(client
     job_response = client.post(
         f"/api/v1/projects/{project['id']}/research-jobs",
         json={
-            "question": "What does this evidence report?",
+            "question": "How do urban heat adaptation strategies affect health outcomes across Indian cities?",
+            "scope": {"geography": "multiple Indian cities"},
             "model_provider": "openrouter",
             "model_name": "openrouter/free",
             "idempotency_key": "report-contract-model-path",
@@ -223,6 +224,7 @@ def test_model_assisted_workflow_report_uses_envelopes_at_storage_and_api(client
             job_id=job_id,
             external_id="fixture:report-contract-source",
             title="Report contract source",
+            source_type="institutional_report",
             retrieval_status="abstract_only",
         )
         db.add(source)
@@ -254,11 +256,26 @@ def test_model_assisted_workflow_report_uses_envelopes_at_storage_and_api(client
             }
         }
         job.current_stage = "synthesis"
-        job.checkpoint_json = {"citation_map": citation_map}
+        job.checkpoint_json = {
+            "citation_map": citation_map,
+            "plan": {
+                "subquestions": [
+                    {"text": "What health outcomes were reported?", "purpose": "Track outcomes."}
+                ]
+            },
+        }
+        verification = _verification()
+        verification["semantic_audit_items"][0].update(
+            {
+                "claim_ids": [db.query(Claim).filter_by(job_id=job_id).one().id],
+                "passage_ids": [passage.id],
+                "requirement_ids": ["Q1"],
+            }
+        )
 
         def build_report(*_args, **_kwargs):
             return (
-                ("# Model-assisted report", citation_map, _verification(), "fixture-model"),
+                ("# Model-assisted report", citation_map, verification, "fixture-model"),
                 None,
                 None,
             )
@@ -279,6 +296,31 @@ def test_model_assisted_workflow_report_uses_envelopes_at_storage_and_api(client
         assert sufficiency["status"] == "PROVISIONAL"
         assert sufficiency["human_review_status"] == "not_performed"
         assert "## Evidence sufficiency" in persisted.body_markdown
+        adaptive = persisted.verification_json["record"]["extensions"]["evidence_sufficiency_v2"]
+        assert adaptive["status"] == "PRELIMINARY_EVIDENCE_MAP"
+        assert adaptive["question_plan"]["question_kind"] in {"causal", "mixed"}
+        assert adaptive["independence"]["content_bearing_publication_groups"] == 1
+        assert adaptive["independence"]["source_records"] == 1
+        assert adaptive["independence"]["groups"][0]["source_types"] == ["institutional_report"]
+        assert adaptive["independence"]["unknown_independence_publications"] == 1
+        requirement_evidence = adaptive["material_requirement_evidence"][0]
+        assert requirement_evidence["requirement_id"] == "Q1"
+        assert requirement_evidence["linked_publication_identities"] == [
+            adaptive["independence"]["groups"][0]["publication_identity"]
+        ]
+        assert requirement_evidence["supporting_publication_identities"] == []
+        assert (
+            requirement_evidence["independence_unknown_publication_identities"]
+            == (requirement_evidence["linked_publication_identities"])
+        )
+        assert requirement_evidence["confirmed_independent_investigation_ids"] == []
+        assert adaptive["independence"]["abstract_only_publication_groups"] == 1
+        assert adaptive["independence"]["full_text_publication_groups"] == 0
+        assert (
+            "evidence_criterion_unmet:full_text_evidence_not_available_for_inference_type"
+            in adaptive["blocking_conditions"]
+        )
+        assert "## Adaptive evidence sufficiency" in persisted.body_markdown
 
     response = client.get(f"/api/v1/reports/{report_id}")
     assert response.status_code == 200, response.text
@@ -290,3 +332,6 @@ def test_model_assisted_workflow_report_uses_envelopes_at_storage_and_api(client
         "model_assisted_not_independently_verified"
     )
     assert api_report["verification"]["evidence_sufficiency_v1"]["status"] == "PROVISIONAL"
+    assert api_report["verification"]["evidence_sufficiency_v2"]["status"] == (
+        "PRELIMINARY_EVIDENCE_MAP"
+    )

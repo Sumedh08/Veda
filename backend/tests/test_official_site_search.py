@@ -240,6 +240,7 @@ def test_verified_publication_page_returns_only_page_metadata_and_honors_robots(
             text=(
                 "<html><head><title>Food security policy evidence</title>"
                 '<link rel="canonical" href="https://fao.example/reports/food-security">'
+                '<link rel="license" href="https://creativecommons.org/licenses/by/4.0/">'
                 '<meta name="citation_title" content="Food security policy evidence">'
                 '<meta name="citation_publication_date" content="2025-08-12">'
                 "</head><body>Full text must not be returned or persisted.</body></html>"
@@ -268,7 +269,43 @@ def test_verified_publication_page_returns_only_page_metadata_and_honors_robots(
     assert result.canonical_url == "https://fao.example/reports/food-security"
     assert result.publication_date == "2025-08-12"
     assert result.metadata_kind == "citation_metadata"
+    assert result.license_code == "cc-by"
+    assert result.license_url == "https://creativecommons.org/licenses/by/4.0/"
+    assert result.license_evidence == "official_page_rel_license"
     assert not hasattr(result, "body")
+
+
+def test_publication_page_license_parser_fails_closed_for_unknown_or_conflicting_rights():
+    from app.providers.official_site_search import _PublicationMetadata
+
+    unknown = _PublicationMetadata()
+    unknown.feed(
+        '<html><head><link rel="license" '
+        'href="https://creativecommons.org/licenses/by-nc/4.0/"></head></html>'
+    )
+    unknown.close()
+    assert unknown.reuse_license() == (
+        None,
+        None,
+        None,
+        "unrecognized_or_restricted",
+    )
+
+    conflicting = _PublicationMetadata()
+    conflicting.feed(
+        '<html><head><link rel="license" '
+        'href="https://creativecommons.org/licenses/by/4.0/">'
+        '<meta name="citation_license" '
+        'content="https://creativecommons.org/publicdomain/zero/1.0/">'
+        "</head></html>"
+    )
+    conflicting.close()
+    assert conflicting.reuse_license() == (
+        None,
+        None,
+        None,
+        "unrecognized_or_conflicting",
+    )
 
 
 def _organization_for_metadata_verification():

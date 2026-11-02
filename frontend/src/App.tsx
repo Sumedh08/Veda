@@ -1227,6 +1227,9 @@ function RetrievalPolicyDetails({ retrieval }: { retrieval: NonNullable<Source['
     </>}
     {retrieval.license && <div><span>Reported license</span><b>{retrieval.license}</b></div>}
     {retrieval.license_evidence && <div><span>License evidence</span><b>{retrieval.license_evidence}</b></div>}
+    {retrieval.rights_decision && <div><span>Content rights decision</span><b>{retrieval.rights_decision.replace(/_/g, ' ')}</b></div>}
+    {retrieval.rights_basis && <div><span>Rights basis</span><b>{retrieval.rights_basis}</b></div>}
+    {retrieval.official_page_content && <div><span>Official page extraction</span><b>{retrieval.official_page_content.status || 'Not recorded'}{retrieval.official_page_content.reason_code ? ` · ${retrieval.official_page_content.reason_code.replace(/_/g, ' ')}` : ''} · rights {retrieval.official_page_content.rights_status || 'not assessed'} · retained {retrieval.official_page_content.content_retained ? 'yes' : 'no'}</b></div>}
     {retrieval.openaire_resolution && <div className="institutional-publication-details">
       <span>OpenAIRE repository resolution</span>
       <b>{(retrieval.openaire_resolution.status || 'unknown').replace(/_/g, ' ')}{retrieval.openaire_resolution.repository_name ? ` · ${retrieval.openaire_resolution.repository_name}` : ''}</b>

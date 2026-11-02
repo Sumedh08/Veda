@@ -25,6 +25,7 @@ from urllib.robotparser import RobotFileParser
 
 import httpx
 
+from app.providers.crossref import CrossrefProvider
 from app.providers.scholarly import ScholarlyWork
 
 MAX_HOME_PAGE_BYTES = 512_000
@@ -95,6 +96,10 @@ class OfficialPublicationPageMetadata:
     metadata_kind: str
     retrieved_at: str
     request_count: int
+    license_code: str | None = None
+    license_url: str | None = None
+    license_evidence: str | None = None
+    license_status: str = "not_declared"
 
 
 class _PublicationMetadata(HTMLParser):
@@ -102,6 +107,7 @@ class _PublicationMetadata(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.metadata: dict[str, str] = {}
         self.canonical: str | None = None
+        self.license_urls: list[tuple[str, str]] = []
         self._in_title = False
         self._title_parts: list[str] = []
 
@@ -114,12 +120,19 @@ class _PublicationMetadata(HTMLParser):
             content = values.get("content")
             if key and isinstance(content, str) and content.strip() and key not in self.metadata:
                 self.metadata[key] = " ".join(content.split())[:500]
-        elif (
-            tag.casefold() == "link" and "canonical" in (values.get("rel") or "").casefold().split()
-        ):
+            if key in {"citation_license", "license", "dc.rights", "dcterms.rights"}:
+                if isinstance(content, str) and content.strip():
+                    self.license_urls.append(
+                        (content.strip()[:2000], "official_page_license_metadata")
+                    )
+        elif tag.casefold() == "link":
+            relations = (values.get("rel") or "").casefold().split()
             href = values.get("href")
             if isinstance(href, str) and href.strip():
-                self.canonical = href.strip()[:2000]
+                if "license" in relations:
+                    self.license_urls.append((href.strip()[:2000], "official_page_rel_license"))
+                if "canonical" in relations and self.canonical is None:
+                    self.canonical = href.strip()[:2000]
 
     def handle_endtag(self, tag: str) -> None:
         if tag.casefold() == "title":
@@ -133,6 +146,31 @@ class _PublicationMetadata(HTMLParser):
     def document_title(self) -> str | None:
         value = " ".join(" ".join(self._title_parts).split()).strip()
         return value[:500] or None
+
+    def reuse_license(self) -> tuple[str | None, str | None, str | None, str]:
+        """Return one unambiguous, recognized item license without retaining page text."""
+        if not self.license_urls:
+            return None, None, None, "not_declared"
+        if len(self.license_urls) > 16:
+            return None, None, None, "unrecognized_or_conflicting"
+        normalized: dict[str, set[str]] = {}
+        for raw_url, evidence in self.license_urls[:16]:
+            safe_url = _safe_https_url(raw_url)
+            if safe_url is None:
+                return None, None, None, "unrecognized_or_conflicting"
+            normalized.setdefault(safe_url, set()).add(evidence)
+        if len(normalized) != 1:
+            return None, None, None, "unrecognized_or_conflicting"
+        license_url, evidence_values = next(iter(normalized.items()))
+        license_code = CrossrefProvider._license_code(license_url)
+        if license_code not in {"cc-by", "cc0"}:
+            return None, None, None, "unrecognized_or_restricted"
+        evidence = (
+            "official_page_rel_license"
+            if "official_page_rel_license" in evidence_values
+            else "official_page_license_metadata"
+        )
+        return license_code, license_url, evidence, "recognized_item_license"
 
 
 def _publication_titles_match(actual: str, expected: str) -> bool:
@@ -600,6 +638,7 @@ class WordPressPublicationSearchProvider:
             raise OfficialSitePublicationSearchError(
                 "page_title_metadata_mismatch", request_dispatched=True
             )
+        license_code, license_url, license_evidence, license_status = parser.reuse_license()
         return OfficialPublicationPageMetadata(
             requested_url=safe_url,
             canonical_url=safe_canonical,
@@ -613,6 +652,10 @@ class WordPressPublicationSearchProvider:
             metadata_kind=metadata_kind,
             retrieved_at=datetime.now(UTC).isoformat(),
             request_count=robots_requests + page_requests,
+            license_code=license_code,
+            license_url=license_url,
+            license_evidence=license_evidence,
+            license_status=license_status,
         )
 
     @staticmethod

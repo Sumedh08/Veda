@@ -371,6 +371,14 @@ export type Source = {
     };
     status?: string;
     scope?: string;
+    rights_decision?: string;
+    rights_basis?: string;
+    official_page_content?: {
+      status?: string;
+      reason_code?: string;
+      rights_status?: string;
+      content_retained?: boolean;
+    };
     openaire_resolution?: {
       status?: string;
       reason?: string;

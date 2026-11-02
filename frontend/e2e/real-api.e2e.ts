@@ -195,6 +195,68 @@ test('browser inspects the preserved ORE Catapult discovery report and full-text
     .toEqual(['/api/v1/auth/dev-session']);
 });
 
+test('browser inspects question-only official institutional report passages from a saved Veda report', async ({ page }) => {
+  test.skip(
+    !process.env.VEDA_REAL_E2E_REUSE_DATABASE_PATH || !process.env.VEDA_REAL_E2E_GOVUK_REPORT_ID,
+    'Set a copied evaluation database and report ID to inspect saved official institutional passages.',
+  );
+  const expectedApiOrigin = new URL(
+    process.env.VEDA_E2E_API_BASE_URL ||
+      `http://127.0.0.1:${process.env.VEDA_REAL_E2E_API_PORT || '8001'}/api/v1`,
+  ).origin;
+  const reportId = process.env.VEDA_REAL_E2E_GOVUK_REPORT_ID!;
+  const question = process.env.VEDA_REAL_E2E_GOVUK_REPORT_QUESTION!;
+  const apiResponses: { url: string; status: number; method: string }[] = [];
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+    if (url.pathname.startsWith('/api/v1/')) {
+      apiResponses.push({ url: response.url(), status: response.status(), method: response.request().method() });
+    }
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Continue to local workspace' }).click();
+  await expect(page.locator('.project-grid')).toBeVisible();
+  const savedReport = await page.evaluate(async ({ apiOrigin, expectedReportId }) => {
+    const session = JSON.parse(sessionStorage.getItem('veda_local_session') || '{}') as { token?: string };
+    const response = await fetch(`${apiOrigin}/api/v1/reports?limit=50`, {
+      headers: session.token ? { Authorization: `Bearer ${session.token}` } : {},
+    });
+    if (!response.ok) throw new Error(`Saved report listing returned ${response.status}`);
+    const body = await response.json() as { items: Array<{ id: string; question: string }> };
+    return body.items.find((item) => item.id === expectedReportId) || null;
+  }, { apiOrigin: expectedApiOrigin, expectedReportId: reportId });
+  expect(savedReport?.question).toBe(question);
+
+  await page.getByRole('button', { name: 'Reports' }).click();
+  const reportRow = page.locator('.report-history-row').filter({ hasText: question });
+  await expect(reportRow).toBeVisible();
+  await reportRow.getByRole('button', { name: 'Open report' }).click();
+  await expect(page.locator('.historical-report-heading')).toContainText(question);
+  await expect(page.locator('.report-content')).toContainText('Offshore wind net zero investment roadmap');
+  await expect(page.locator('.report-content')).toContainText('Evidence sufficiency');
+
+  await page.getByRole('button', { name: 'Open source S1' }).first().click();
+  const inspector = page.getByRole('dialog', { name: 'Offshore wind net zero investment roadmap' });
+  await expect(inspector).toBeVisible();
+  await expect(inspector.locator('.access-badge')).toContainText('OFFICIAL PUBLICATION PAGE BODY');
+  await expect(inspector).toContainText('GOV.UK publication page');
+  await expect(inspector).toContainText('6 exact passages');
+  await expect(inspector).toContainText('Department for Energy Security and Net Zero');
+  await expect(inspector.locator('.passage-stack')).toContainText('GOV.UK page body paragraph 1, sentence 1');
+  await expect(inspector.locator('.passage-stack')).toContainText('significant opportunities for private sector investment');
+  await expect(inspector.getByRole('link', { name: 'Open GOV.UK publication' })).toHaveAttribute(
+    'href',
+    'https://www.gov.uk/government/publications/offshore-wind-net-zero-investment-roadmap',
+  );
+
+  expect(apiResponses.some((item) => new URL(item.url).pathname === '/api/v1/reports')).toBe(true);
+  expect(apiResponses.some((item) => new URL(item.url).pathname === `/api/v1/reports/${reportId}/inspection`)).toBe(true);
+  expect(apiResponses.every((item) => new URL(item.url).origin === expectedApiOrigin && item.status < 400)).toBe(true);
+  expect(apiResponses.filter((item) => item.method !== 'GET').map((item) => new URL(item.url).pathname))
+    .toEqual(['/api/v1/auth/dev-session']);
+});
+
 test('real browser project name and user-authored brief persist through create, edit, and reload', async ({ page }) => {
   const expectedApiOrigin = new URL(
     process.env.VEDA_E2E_API_BASE_URL ||

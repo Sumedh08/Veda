@@ -2325,6 +2325,89 @@ def _crossref_verified_official_html_location(
     )
 
 
+def _official_page_metadata_verified_html_location(
+    *,
+    source_url: str | None,
+    organization_evidence: dict[str, Any],
+    page_metadata_evidence: dict[str, Any],
+) -> tuple[dict[str, Any], Any] | None:
+    """Resolve a DOI-independent official HTML source using item and host evidence.
+
+    A DOI or ROR identifier is not required when an already-qualified organization
+    identity, exact official-domain publication page, robot-checked title/canonical
+    metadata, and an unambiguous item-level reuse license are persisted. The exact
+    response host must still have an independently reviewed host policy.
+    """
+    if (
+        not isinstance(source_url, str)
+        or not isinstance(organization_evidence, dict)
+        or not isinstance(page_metadata_evidence, dict)
+        or organization_evidence.get("identity_status")
+        not in {"VERIFIED_ESTABLISHED", "VERIFIED_DOMAIN_SPECIALIST"}
+        or not isinstance(organization_evidence.get("organization_id"), str)
+        or not organization_evidence.get("organization_id", "").strip()
+        or organization_evidence.get("publisher_verification") != "official_page_metadata_verified"
+        or organization_evidence.get("official_publication_url") != source_url
+        or page_metadata_evidence.get("page_metadata_verification")
+        != "robots_allowed_title_and_canonical_match"
+        or page_metadata_evidence.get("metadata_kind")
+        not in {"citation_metadata", "dublin_core_metadata", "open_graph_article_metadata"}
+        or page_metadata_evidence.get("license_status") != "recognized_item_license"
+        or page_metadata_evidence.get("license_evidence")
+        not in {"official_page_rel_license", "official_page_license_metadata"}
+    ):
+        return None
+
+    license_code = page_metadata_evidence.get("license_code")
+    license_url = page_metadata_evidence.get("license_url")
+    safe_source_url = CrossrefProvider._safe_https_url(source_url)
+    safe_license_url = (
+        CrossrefProvider._safe_https_url(license_url) if isinstance(license_url, str) else None
+    )
+    if (
+        safe_source_url is None
+        or safe_source_url != source_url
+        or safe_license_url is None
+        or license_code not in PERMITTED_LICENSES
+        or CrossrefProvider._license_code(safe_license_url) != license_code
+    ):
+        return None
+
+    official_domain = organization_evidence.get("official_domain")
+    if not isinstance(official_domain, str) or not official_domain.strip():
+        return None
+    try:
+        parsed = urlsplit(safe_source_url)
+        port = parsed.port
+        host = (parsed.hostname or "").encode("idna").decode("ascii").casefold().rstrip(".")
+        domain = official_domain.encode("idna").decode("ascii").casefold().rstrip(".")
+    except (UnicodeError, ValueError):
+        return None
+    if (
+        parsed.scheme.casefold() != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+        or not host
+        or (host != domain and not host.endswith("." + domain))
+    ):
+        return None
+    try:
+        host_policy = reviewed_host_policy(host, license_code)
+    except ValueError:
+        return None
+    return (
+        {
+            "is_oa": True,
+            "landing_page_url": safe_source_url,
+            "pdf_url": None,
+            "license": license_code,
+            "version": "official_page",
+        },
+        host_policy,
+    )
+
+
 def _evidence_paragraphs(text: str) -> list[str]:
     """Return bounded, prose-like paragraphs from a page or provider Markdown."""
     paragraphs: list[str] = []
@@ -3864,11 +3947,28 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                         "official page metadata verification"
                                                     ),
                                                     "official_publication_url": canonical_url,
+                                                    "official_page_license": {
+                                                        "license_code": page_metadata.license_code,
+                                                        "license_url": page_metadata.license_url,
+                                                        "license_evidence": page_metadata.license_evidence,
+                                                        "license_status": page_metadata.license_status,
+                                                        "observed_at": page_metadata.retrieved_at,
+                                                    },
+                                                    "page_metadata_verification": (
+                                                        "robots_allowed_title_and_canonical_match"
+                                                    ),
+                                                    "page_metadata_kind": page_metadata.metadata_kind,
+                                                    "page_metadata_retrieved_at": (
+                                                        page_metadata.retrieved_at
+                                                    ),
                                                     "quality_assessment": "not_assessed",
                                                     "content_access": "not_retrieved",
                                                     "publication_content_access": "not_retrieved",
                                                     "publication_rights_status": (
-                                                        "not_assessed_metadata_only"
+                                                        "item_license_identified_not_yet_accessed"
+                                                        if page_metadata.license_status
+                                                        == "recognized_item_license"
+                                                        else "not_assessed_metadata_only"
                                                     ),
                                                 },
                                                 "official_site_publication_search": {
@@ -3889,7 +3989,18 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                                     ),
                                                     "page_body_retained": False,
                                                     "content_fetched": False,
-                                                    "rights_status": "not_assessed_metadata_only",
+                                                    "page_metadata_license": {
+                                                        "license_code": page_metadata.license_code,
+                                                        "license_url": page_metadata.license_url,
+                                                        "license_evidence": page_metadata.license_evidence,
+                                                        "license_status": page_metadata.license_status,
+                                                    },
+                                                    "rights_status": (
+                                                        "item_license_identified_not_yet_accessed"
+                                                        if page_metadata.license_status
+                                                        == "recognized_item_license"
+                                                        else "not_assessed_metadata_only"
+                                                    ),
                                                 },
                                             },
                                             source_type="institutional_report",
@@ -3918,7 +4029,16 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                             "page_metadata_kind": page_metadata.metadata_kind,
                                             "page_body_retained": False,
                                             "content_fetched": False,
-                                            "rights_status": "not_assessed_metadata_only",
+                                            "license_code": page_metadata.license_code,
+                                            "license_url": page_metadata.license_url,
+                                            "license_evidence": page_metadata.license_evidence,
+                                            "license_status": page_metadata.license_status,
+                                            "rights_status": (
+                                                "item_license_identified_not_yet_accessed"
+                                                if page_metadata.license_status
+                                                == "recognized_item_license"
+                                                else "not_assessed_metadata_only"
+                                            ),
                                         }
                                         verified_publications.append(verified_publication)
                                         general_web_discovery[
@@ -3934,6 +4054,10 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                             page_title=page_metadata.title,
                                             canonical_url=canonical_url,
                                             metadata_kind=page_metadata.metadata_kind,
+                                            license_code=page_metadata.license_code,
+                                            license_url=page_metadata.license_url,
+                                            license_evidence=page_metadata.license_evidence,
+                                            license_status=page_metadata.license_status,
                                             request_count=page_metadata.request_count,
                                         )
                                         for stored_hit in reversed(general_web_discovery["hits"]):
@@ -6768,7 +6892,12 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                 "sections_count": len(structured.sections),
                                 "passages_count": source_jats_passage_count,
                                 "passage_selection_method": "priority_stratified_section_round_robin_v1",
-                                "rights_decision": "PERMITTED",
+                                "rights_decision": (
+                                    "PERMITTED_WITH_RESTRICTIONS"
+                                    if source.metadata_json.get("provider")
+                                    == "Official publication page metadata"
+                                    else "PERMITTED"
+                                ),
                                 "document_sha256": structured.content_sha256,
                             }
                             source_metadata = dict(source.metadata_json or {})
@@ -7271,6 +7400,79 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                 ),
                             }
                         )
+            elif provider_name == "Official publication page metadata":
+                extensions = (
+                    provider_metadata.get("extensions", {})
+                    if isinstance(provider_metadata, dict)
+                    else {}
+                )
+                organization_evidence = (
+                    extensions.get("organization_discovery")
+                    if isinstance(extensions, dict)
+                    else None
+                )
+                official_site_evidence = (
+                    extensions.get("official_site_publication_search")
+                    if isinstance(extensions, dict)
+                    else None
+                )
+                page_metadata_evidence = (
+                    {
+                        **official_site_evidence,
+                        **(
+                            organization_evidence.get("official_page_license", {})
+                            if isinstance(organization_evidence, dict)
+                            else {}
+                        ),
+                    }
+                    if isinstance(official_site_evidence, dict)
+                    else {}
+                )
+                official_html = _official_page_metadata_verified_html_location(
+                    source_url=(
+                        organization_evidence.get("official_publication_url")
+                        if isinstance(organization_evidence, dict)
+                        else source.url
+                    ),
+                    organization_evidence=(
+                        organization_evidence if isinstance(organization_evidence, dict) else {}
+                    ),
+                    page_metadata_evidence=page_metadata_evidence,
+                )
+                if official_html is None:
+                    retrieval_meta["official_page_content"] = {
+                        "status": "not_attempted",
+                        "reason_code": "item_license_or_host_policy_not_verified",
+                        "rights_status": (
+                            page_metadata_evidence.get("license_status", "not_assessed")
+                        ),
+                        "content_retained": False,
+                    }
+                    source_metadata = dict(source.metadata_json or {})
+                    source_metadata["retrieval"] = retrieval_meta
+                    source.metadata_json = source_metadata
+                    continue
+                best_location, official_host_policy = official_html
+                retrieval_meta.update(
+                    {
+                        "scope": "official_page_item_licensed_verified_publication",
+                        "license": best_location["license"],
+                        "license_evidence": page_metadata_evidence.get("license_evidence"),
+                        "license_url": page_metadata_evidence.get("license_url"),
+                        "rights_decision": "PERMITTED_WITH_RESTRICTIONS",
+                        "rights_basis": (
+                            "recognized item license, verified official publication metadata, "
+                            "checked robots rules, and exact reviewed host policy"
+                        ),
+                        "site_policy_status": "reviewed_host_and_item_license_match",
+                        "host_policy_id": official_host_policy.policy_id,
+                        "host_terms_url": official_host_policy.terms_url,
+                        "official_publication_url": best_location["landing_page_url"],
+                        "publisher_identity_source": organization_evidence.get(
+                            "verification_source"
+                        ),
+                    }
+                )
             elif provider_name != "OpenAlex" or not isinstance(best_location, dict):
                 source_metadata = dict(source.metadata_json or {})
                 source_metadata["retrieval"] = retrieval_meta
@@ -7503,6 +7705,16 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                             if isinstance(html_extensions, dict)
                             else {}
                         )
+                        official_site_evidence = (
+                            html_extensions.get("official_site_publication_search", {})
+                            if isinstance(html_extensions, dict)
+                            else {}
+                        )
+                        official_page_license = (
+                            organization_evidence.get("official_page_license", {})
+                            if isinstance(organization_evidence, dict)
+                            else {}
+                        )
                         crossref_license_code = (
                             crossref_rights.get("license_code")
                             if isinstance(crossref_rights, dict)
@@ -7526,26 +7738,48 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                         normalized_page_host = (
                             page_final_host.casefold().strip().rstrip(".").removeprefix("www.")
                         )
-                        publisher_is_verified = (
-                            provider_name == "Crossref"
-                            and isinstance(organization_evidence, dict)
+                        publisher_is_verified = bool(
+                            isinstance(organization_evidence, dict)
                             and organization_evidence.get("identity_status")
                             in {"VERIFIED_ESTABLISHED", "VERIFIED_DOMAIN_SPECIALIST"}
-                            and organization_evidence.get("publisher_verification")
-                            == "verified_organization_domain_and_crossref_publisher_identity"
                             and organization_evidence.get("official_publication_url") == landing_url
                             and normalized_official_domain
                             and (
                                 normalized_page_host == normalized_official_domain
                                 or normalized_page_host.endswith("." + normalized_official_domain)
                             )
-                            and retrieval_meta.get("scope")
-                            == "crossref_licensed_verified_official_publisher_page"
-                            and crossref_license_code == license_code
-                            and crossref_license_code in PERMITTED_LICENSES
-                            and isinstance(crossref_license_url, str)
-                            and CrossrefProvider._license_code(crossref_license_url)
-                            == crossref_license_code
+                            and (
+                                (
+                                    provider_name == "Crossref"
+                                    and organization_evidence.get("publisher_verification")
+                                    == "verified_organization_domain_and_crossref_publisher_identity"
+                                    and retrieval_meta.get("scope")
+                                    == "crossref_licensed_verified_official_publisher_page"
+                                    and crossref_license_code == license_code
+                                    and crossref_license_code in PERMITTED_LICENSES
+                                    and isinstance(crossref_license_url, str)
+                                    and CrossrefProvider._license_code(crossref_license_url)
+                                    == crossref_license_code
+                                )
+                                or (
+                                    provider_name == "Official publication page metadata"
+                                    and organization_evidence.get("publisher_verification")
+                                    == "official_page_metadata_verified"
+                                    and retrieval_meta.get("scope")
+                                    == "official_page_item_licensed_verified_publication"
+                                    and official_site_evidence.get("page_metadata_verification")
+                                    == "robots_allowed_title_and_canonical_match"
+                                    and official_page_license.get("license_status")
+                                    == "recognized_item_license"
+                                    and official_page_license.get("license_code") == license_code
+                                    and license_code in PERMITTED_LICENSES
+                                    and isinstance(official_page_license.get("license_url"), str)
+                                    and CrossrefProvider._license_code(
+                                        official_page_license["license_url"]
+                                    )
+                                    == license_code
+                                )
+                            )
                         )
                         host_policy_and_robots_allow = bool(
                             page_host_policy_id
@@ -7600,9 +7834,17 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                 "status": "not_attempted",
                                 "requested_url": landing_url,
                                 "official_domain": normalized_official_domain,
-                                "publisher_verification": "crossref_title_publisher_and_verified_organization_domain",
+                                "publisher_verification": (
+                                    "official_page_metadata_title_canonical_and_verified_domain"
+                                    if provider_name == "Official publication page metadata"
+                                    else "crossref_title_publisher_and_verified_organization_domain"
+                                ),
                                 "rights_decision": "PERMITTED",
-                                "rights_evidence": "verified Crossref item license plus reviewed host policy and checked robots rules",
+                                "rights_evidence": (
+                                    "recognized official-page item license plus reviewed host policy and checked robots rules"
+                                    if provider_name == "Official publication page metadata"
+                                    else "verified Crossref item license plus reviewed host policy and checked robots rules"
+                                ),
                                 "license": license_code,
                                 "host_policy_id": page_host_policy_id,
                                 "robots_status": page_robots_status,

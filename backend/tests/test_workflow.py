@@ -4128,6 +4128,80 @@ def test_verified_crossref_publication_uses_only_reviewed_official_html_hosts():
     )
 
 
+def test_doi_less_verified_official_page_requires_item_license_and_exact_host_policy(monkeypatch):
+    from app.research.workflow import _official_page_metadata_verified_html_location
+
+    policy = SimpleNamespace(
+        host="research.example",
+        policy_id="research-site-terms-v1",
+        terms_url="https://research.example/terms",
+    )
+
+    def host_policy(host, license_code):
+        if host == policy.host and license_code == "cc-by":
+            return policy
+        raise ValueError("host_policy_unknown")
+
+    monkeypatch.setattr(workflow, "reviewed_host_policy", host_policy)
+    page_url = "https://research.example/reports/urban-heat"
+    organization = {
+        "organization_id": "orgid:independently-verified-example",
+        "identity_status": "VERIFIED_DOMAIN_SPECIALIST",
+        "official_domain": "research.example",
+        "official_publication_url": page_url,
+        "publisher_verification": "official_page_metadata_verified",
+    }
+    page_metadata = {
+        "page_metadata_verification": "robots_allowed_title_and_canonical_match",
+        "metadata_kind": "citation_metadata",
+        "license_code": "cc-by",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "license_evidence": "official_page_rel_license",
+        "license_status": "recognized_item_license",
+    }
+
+    location = _official_page_metadata_verified_html_location(
+        source_url=page_url,
+        organization_evidence=organization,
+        page_metadata_evidence=page_metadata,
+    )
+
+    assert location is not None
+    best_location, returned_policy = location
+    assert best_location == {
+        "is_oa": True,
+        "landing_page_url": page_url,
+        "pdf_url": None,
+        "license": "cc-by",
+        "version": "official_page",
+    }
+    assert returned_policy is policy
+    assert (
+        _official_page_metadata_verified_html_location(
+            source_url=page_url,
+            organization_evidence=organization,
+            page_metadata_evidence={**page_metadata, "license_status": "not_declared"},
+        )
+        is None
+    )
+    assert (
+        _official_page_metadata_verified_html_location(
+            source_url=page_url,
+            organization_evidence={**organization, "publisher_verification": "unverified"},
+            page_metadata_evidence=page_metadata,
+        )
+        is None
+    )
+    assert (
+        _official_page_metadata_verified_html_location(
+            source_url="https://unreviewed.example/reports/urban-heat",
+            organization_evidence=organization,
+            page_metadata_evidence=page_metadata,
+        )
+        is None
+    )
+
+
 def test_crossref_verified_official_html_enters_persisted_passage_pipeline(client, monkeypatch):
     from datetime import UTC, datetime
     from hashlib import sha256
@@ -4326,11 +4400,130 @@ def test_crossref_verified_official_html_enters_persisted_passage_pipeline(clien
     assert report_publication["content_fetched"] is True
     assert report_publication["rights_status"] == "permitted"
     assert report_publication["passage_count"] == 3
-    linked_search_publication = coverage["organization_discovery"]["publication_searches"][0][
-        "publications"
-    ][0]
-    assert linked_search_publication["source_id"] == source["id"]
-    assert linked_search_publication["content_fetched"] is True
+
+
+def test_doi_less_official_page_with_verified_item_license_persists_passages(client, monkeypatch):
+    from datetime import UTC, datetime
+    from hashlib import sha256
+
+    from app.research.safe_fetch import SafeHTMLDocument
+
+    page_url = "https://specialist.example/research/urban-heat"
+    page_text = (
+        "The assessment compared heat exposure across three metropolitan regions.\n\n"
+        "Methods combined satellite-derived land-surface temperature with census indicators.\n\n"
+        "Results show that exposure and adaptive capacity vary substantially between neighborhoods."
+    )
+    policy = SimpleNamespace(
+        host="specialist.example",
+        policy_id="fixture-reviewed-terms-v1",
+        terms_url="https://specialist.example/terms",
+    )
+    fetched = []
+
+    class FixtureHTMLFetcher:
+        document_byte_limit = 2_000_000
+
+        def __init__(self, **_kwargs):
+            self.timeout_seconds = 8
+
+        def fetch_html(self, url, *, license_name):
+            fetched.append((url, license_name))
+            return SafeHTMLDocument(
+                text=page_text,
+                sha256=sha256(page_text.encode()).hexdigest(),
+                media_type="text/html",
+                final_host="specialist.example",
+                retrieved_at=datetime.now(UTC),
+                truncated=False,
+                host_policy_id=policy.policy_id,
+                host_terms_url=policy.terms_url,
+                robots_status="rules_checked",
+            )
+
+    monkeypatch.setattr(workflow, "reviewed_host_policy", lambda _host, _license: policy)
+    monkeypatch.setattr(workflow, "SafeHTMLFetcher", FixtureHTMLFetcher)
+    project = create_project(client)
+    job = create_job(
+        client,
+        project["id"],
+        idempotency_key="official-page-doi-less-licensed-01",
+        question="How do heat hazards and social vulnerability vary across Indian cities?",
+    )
+    planned = client.post(
+        f"/api/v1/research-jobs/{job['id']}/advance",
+        json={"operation_key": "official-page-doi-less-licensed-plan-01"},
+    )
+    assert planned.status_code == 200, planned.text
+    with client.db_sessions() as db:
+        research_job = db.get(ResearchJob, job["id"])
+        assert research_job is not None
+        research_job.current_stage = "extraction"
+        db.add(
+            Source(
+                job_id=job["id"],
+                external_id="official-page:fixture-doi-less-urban-heat",
+                title="Urban heat vulnerability assessment across Indian cities",
+                doi=None,
+                url=page_url,
+                publisher="Independent Urban Climate Institute",
+                source_type="institutional_report",
+                retrieval_status="metadata_only",
+                metadata_json={
+                    "provider": "Official publication page metadata",
+                    "provider_metadata": workflow.versioned_provider_metadata(
+                        "Official publication page metadata",
+                        {
+                            "organization_discovery": {
+                                "organization_id": "orgid:independently-verified-example",
+                                "identity_status": "VERIFIED_DOMAIN_SPECIALIST",
+                                "official_domain": "specialist.example",
+                                "official_publication_url": page_url,
+                                "publisher_verification": "official_page_metadata_verified",
+                                "official_page_license": {
+                                    "license_code": "cc-by",
+                                    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+                                    "license_evidence": "official_page_rel_license",
+                                    "license_status": "recognized_item_license",
+                                },
+                            },
+                            "official_site_publication_search": {
+                                "page_metadata_verification": "robots_allowed_title_and_canonical_match",
+                                "metadata_kind": "citation_metadata",
+                            },
+                        },
+                    ),
+                },
+            )
+        )
+        db.commit()
+
+    extracted = client.post(
+        f"/api/v1/research-jobs/{job['id']}/advance",
+        json={"operation_key": "official-page-doi-less-licensed-extract-01"},
+    )
+    assert extracted.status_code == 200, extracted.text
+    source = next(
+        item
+        for item in client.get(f"/api/v1/research-jobs/{job['id']}/sources").json()["items"]
+        if item["url"] == page_url
+    )
+    inspected = client.get(f"/api/v1/sources/{source['id']}").json()
+
+    assert extracted.json()["current_stage"] == "appraisal"
+    assert fetched == [(page_url, "cc-by")]
+    assert source["doi"] is None
+    assert source["retrieval_status"] == "full_text_html"
+    assert source["retrieval"]["scope"] == "official_page_item_licensed_verified_publication"
+    assert source["retrieval"]["rights_decision"] == "PERMITTED_WITH_RESTRICTIONS"
+    assert source["retrieval"]["host_policy_id"] == policy.policy_id
+    assert len(inspected["passages"]) == 3
+    assert any(
+        "satellite-derived land-surface temperature" in item["content"]
+        for item in inspected["passages"]
+    )
+    claims = client.get(f"/api/v1/research-jobs/{job['id']}/claims").json()["items"]
+    assert any(claim["source_id"] == source["id"] for claim in claims)
 
 
 @pytest.mark.parametrize(

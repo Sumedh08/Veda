@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "record_id": "ANN-SCHEMA-ONLY",
+  "case_id": "DEV01",
+  "run_id": null,
+  "run_manifest_sha256": null,
+  "review_status": "not_reviewed",
+  "reviewer": {
+    "pseudonym": null,
+    "role": null,
+    "expertise_area": null,
+    "conflict_declared": null,
+    "conflict_notes": null
+  },
+  "review_date": null,
+  "provider": null,
+  "model": null,
+  "model_version": null,
+  "source_set_version": null,
+  "cost_observation": {
+    "currency": null,
+    "amount": null,
+    "reported_by_provider": null,
+    "input_tokens": null,
+    "output_tokens": null,
+    "status": "not_observed"
+  },
+  "scores": {
+    "question_scope_fit": null,
+    "source_provenance_access": null,
+    "claim_passage_support": null,
+    "study_design_interpretation": null,
+    "outcome_denominator": null,
+    "uncertainty_limitations": null,
+    "counterevidence_heterogeneity": null,
+    "conclusion_calibration": null,
+    "usefulness_traceability": null
+  },
+  "citation_findings": [],
+  "uncited_claim_findings": [],
+  "scope_notes": "Schema-only fixture. No report or underlying source was reviewed.",
+  "limitations_and_omissions": "This fixture validates record shape only; it contains no score, evidence, or research-quality result.",
+  "adjudication": {
+    "status": "not_started",
+    "decision": null,
+    "notes": "No human reviews exist to adjudicate.",
+    "reviewer_count": null
+  }
+}

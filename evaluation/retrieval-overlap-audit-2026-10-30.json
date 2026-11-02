@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "artifact": "evaluation/openrouter-live-runtime-snapshot-20261029.json",
+  "paired_batch_artifact": "evaluation/openrouter-live-batch-20261029T155042Z.json",
+  "method": "Reapply current deterministic title-integrity and lexical topic filters to saved candidate titles; selected records can also use their saved abstract excerpt.",
+  "counts": {
+    "candidate_occurrences": 203,
+    "historically_selected_occurrences": 140,
+    "clean_title_only_gate_passes": 44,
+    "selected_clean_records_passing_gate": 34,
+    "selected_clean_records_rejected_for_topic_overlap": 104,
+    "malformed_title_occurrences": 7,
+    "selected_malformed_title_occurrences": 2
+  },
+  "malformed_title_examples": [
+    {
+      "candidate_id": "doi:10.52783/jier.v6i1.4539",
+      "title_excerpt": "Articles \"Harnessing Spirituality to Combat Workplace Stress\" Ritu Saxena, Vibhor Jain DOI 10.52783/jier.v6i1.4117 357 PDF: 402 PDF The Algorithmic Customer: An In-Depth Analysis of the Impact of Artificial Intelligence and Machine Learning"
+    },
+    {
+      "candidate_id": "doi:10.31327/jte.v1i2.1892",
+      "title_excerpt": "JOURNAL OF TEACHING AND EDUCATION Q U I C K M E N U FOCUS AND SCOPE EDITORIAL TEAM REVIEWERS REVIEWER GUIDELINES AUTHOR GUIDELINES PUBLICATION ETHICS INDEXING DOWNLOAD AUTHOR FEES CONTACT US USER You are logged in as... admin My Journals My"
+    },
+    {
+      "candidate_id": "doi:10.52783/jier.v6i1.4539",
+      "title_excerpt": "Articles \"Harnessing Spirituality to Combat Workplace Stress\" Ritu Saxena, Vibhor Jain DOI 10.52783/jier.v6i1.4117 357 PDF: 402 PDF The Algorithmic Customer: An In-Depth Analysis of the Impact of Artificial Intelligence and Machine Learning"
+    },
+    {
+      "candidate_id": "doi:10.52783/jier.v6i1.4539",
+      "title_excerpt": "Articles \"Harnessing Spirituality to Combat Workplace Stress\" Ritu Saxena, Vibhor Jain DOI 10.52783/jier.v6i1.4117 357 PDF: 402 PDF The Algorithmic Customer: An In-Depth Analysis of the Impact of Artificial Intelligence and Machine Learning"
+    },
+    {
+      "candidate_id": "doi:10.52783/jier.v6i1.4539",
+      "title_excerpt": "Articles \"Harnessing Spirituality to Combat Workplace Stress\" Ritu Saxena, Vibhor Jain DOI 10.52783/jier.v6i1.4117 357 PDF: 402 PDF The Algorithmic Customer: An In-Depth Analysis of the Impact of Artificial Intelligence and Machine Learning"
+    },
+    {
+      "candidate_id": "doi:10.52783/jier.v6i1.4539",
+      "title_excerpt": "Articles \"Harnessing Spirituality to Combat Workplace Stress\" Ritu Saxena, Vibhor Jain DOI 10.52783/jier.v6i1.4117 357 PDF: 402 PDF The Algorithmic Customer: An In-Depth Analysis of the Impact of Artificial Intelligence and Machine Learning"
+    },
+    {
+      "candidate_id": "doi:10.52783/jier.v6i1.4539",
+      "title_excerpt": "Articles \"Harnessing Spirituality to Combat Workplace Stress\" Ritu Saxena, Vibhor Jain DOI 10.52783/jier.v6i1.4117 357 PDF: 402 PDF The Algorithmic Customer: An In-Depth Analysis of the Impact of Artificial Intelligence and Machine Learning"
+    }
+  ],
+  "per_case": [
+    {
+      "job_id": "9c3a2d6e-9d46-4ec7-808f-0a1385e6e31c",
+      "question": "For a 750-employee US services company considering a 12-week generative-AI rollout across HR, support, engineering, finance, and marketing, what evidence would establish net productivity, quality, cost, equity, and safety effects against a staggered-control design, and which outcomes should gate expansion?",
+      "candidate_occurrences": 20,
+      "historically_selected_occurrences": 14,
+      "clean_title_only_gate_passes": 2,
+      "selected_clean_records_passing_gate": 1,
+      "selected_clean_records_rejected_for_topic_overlap": 13
+    },
+    {
+      "job_id": "84553de6-d2d4-457f-8b5b-f42bf39722ac",
+      "question": "For a 24-analyst public-health research unit completing 300 descriptive analyses per quarter, does a generative-AI data-analysis copilot improve reproducible, independently checked analyses per analyst-week compared with current scripts and peer support without increasing coding, interpretation, or privacy errors?",
+      "candidate_occurrences": 20,
+      "historically_selected_occurrences": 14,
+      "clean_title_only_gate_passes": 7,
+      "selected_clean_records_passing_gate": 4,
+      "selected_clean_records_rejected_for_topic_overlap": 10
+    },
+    {
+      "job_id": "73a3aa35-c373-4bab-80df-d16c20a03857",
+      "question": "In a 1,000-employee professional-services firm with 20,000 internal knowledge queries monthly, does a retrieval-grounded generative-AI assistant reduce employee search time and improve answer accuracy relative to the existing intranet search without increasing unsupported or stale-policy answers?",
+      "candidate_occurrences": 20,
+      "historically_selected_occurrences": 14,
+      "clean_title_only_gate_passes": 10,
+      "selected_clean_records_passing_gate": 6,
+      "selected_clean_records_rejected_for_topic_overlap": 8
+    },
+    {
+      "job_id": "0d080cec-ee59-490c-bcd2-4621e15356a9",
+      "question": "For a 500-employee US manufacturer processing 6,000 invoices monthly, does AI-assisted invoice extraction and exception routing reduce cost and cycle time per correctly paid invoice versus the current accounts-payable process while preserving approval controls and fraud detection?",
+      "candidate_occurrences": 20,
+      "historically_selected_occurrences": 14,
+      "clean_title_only_gate_passes": 4,
+      "selected_clean_records_passing_gate": 4,
+      "selected_clean_records_rejected_for_topic_overlap": 10,
+      "malformed_title_occurrences": 1
+    },
+    {
+      "job_id": "87b60a99-6a53-40d4-a137-d8994a0a0332",
+      "question": "At a 25-person B2B marketing team publishing 40 technical articles monthly, does a human-edited generative-AI drafting workflow improve publication throughput and qualified organic conversions per editor-hour versus the existing workflow without reducing factual accuracy or brand quality?",
+      "candidate_occurrences": 20,
+      "historically_selected_occurrences": 14,
+      "selected_clean_records_rejected_for_topic_overlap": 11,
+      "malformed_title_occurrences": 4,
+      "selected_malformed_title_occurrences": 2,
+      "clean_title_only_gate_passes": 1,
+      "selected_clean_records_passing_gate": 1
+    },
+    {
+      "job_id": "b28f013a-ec02-426c-aef3-d9158b8071ab",
+      "question": "For a 35-person SaaS sales team contacting 8,000 qualified leads monthly, does generative-AI account research and email personalization increase held qualified meetings per eligible lead versus the current sales sequence, net of research, editing, and compliance time?",
+      "candidate_occurrences": 20,
+      "historically_selected_occurrences": 14,
+      "clean_title_only_gate_passes": 3,
+      "selected_clean_records_passing_gate": 3,
+      "selected_clean_records_rejected_for_topic_overlap": 11,
+      "malformed_title_occurrences": 1
+    },
+    {
+      "job_id": "227f72dd-8f5b-4dd7-bdf7-5e768f66357b",
+      "question": "At a 60-engineer product company, does access to an AI coding copilot increase independently reviewed, production-accepted work per engineer-week over 12 weeks without raising rework, security defects, or code-review burden?",
+      "candidate_occurrences": 22,
+      "historically_selected_occurrences": 14,
+      "selected_clean_records_rejected_for_topic_overlap": 12,
+      "clean_title_only_gate_passes": 2,
+      "selected_clean_records_passing_gate": 2
+    },
+    {
+      "job_id": "8cc63a35-37be-4546-87a3-5c91d24c90cd",
+      "question": "For a 120-agent customer-support center handling 50,000 monthly tickets, does an agent-facing generative-AI reply assistant improve resolution time and customer satisfaction compared with the same agents without suggestions, after accounting for case mix and escalation?",
+      "candidate_occurrences": 21,
+      "historically_selected_occurrences": 14,
+      "clean_title_only_gate_passes": 9,
+      "selected_clean_records_passing_gate": 7,
+      "selected_clean_records_rejected_for_topic_overlap": 7,
+      "malformed_title_occurrences": 1
+    },
+    {
+      "job_id": "3eaf3406-046d-4af7-9794-3abaf293531c",
+      "question": "In a 200-employee startup onboarding 30 customer-support hires per quarter, does a generative-AI onboarding assistant shorten time to independent work and improve 90-day retention versus the existing mentor-led program without increasing policy errors?",
+      "candidate_occurrences": 20,
+      "historically_selected_occurrences": 14,
+      "clean_title_only_gate_passes": 2,
+      "selected_clean_records_passing_gate": 2,
+      "selected_clean_records_rejected_for_topic_overlap": 12
+    },
+    {
+      "job_id": "01094f0b-14c4-4f87-9ca5-f27698aeb8d4",
+      "question": "For a 200-employee US software startup hiring 40 engineers and customer-support staff over six months, does an AI-assisted résumé screen reduce recruiter time-to-shortlist without worsening job-relevant selection quality or adverse impact?",
+      "candidate_occurrences": 20,
+      "historically_selected_occurrences": 14,
+      "selected_clean_records_rejected_for_topic_overlap": 10,
+      "clean_title_only_gate_passes": 4,
+      "selected_clean_records_passing_gate": 4
+    }
+  ],
+  "interpretation_limits": [
+    "Candidate occurrences are not unique papers; the same record can appear in multiple queries or jobs.",
+    "Nonselected candidate abstracts are not present in the saved runtime snapshot, so the title-only pass count is not a replay of the full discovery gate.",
+    "Selected records have saved abstracts; rejection counts are deterministic filter outcomes, not human relevance judgments.",
+    "No precision, recall, false-positive rate, or scientific quality score can be calculated without reviewed labels."
+  ],
+  "manual_regression_examples": {
+    "false_positive_blocked": "The sPHENIX fast-data-processing/detector-control title previously passed via generic AI, processing and time overlap; the query-context filter now rejects it.",
+    "adjacent_synonym_recovered": "Designing and Evaluating Generative AI Search Tools for Human Cognitive Augmentation now passes a knowledge-retrieval query via direct title term search plus generative-AI intervention match; the paper's topical adequacy remains unverified because its abstract was not in that snapshot."
+  }
+}

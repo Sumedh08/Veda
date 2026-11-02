@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "review_policy": "Exact host entries only; no wildcard. Entries record reviewed host access terms; item-level licenses remain independently required.",
+  "hosts": [
+    {
+      "host": "frontiersin.org",
+      "policy_id": "frontiers-open-access-2026-11-01",
+      "terms_url": "https://www.frontiersin.org/about/open-access",
+      "reviewed_at": "2026-11-01",
+      "allowed_licenses": ["cc-by"],
+      "minimum_interval_seconds": 2.0
+    },
+    {
+      "host": "www.frontiersin.org",
+      "policy_id": "frontiers-open-access-2026-11-01",
+      "terms_url": "https://www.frontiersin.org/about/open-access",
+      "reviewed_at": "2026-11-01",
+      "allowed_licenses": ["cc-by"],
+      "minimum_interval_seconds": 2.0
+    },
+    {
+      "host": "strathprints.strath.ac.uk",
+      "policy_id": "strathprints-research-copy-2026-11-01",
+      "terms_url": "https://strathprints.strath.ac.uk/policies.html",
+      "reviewed_at": "2026-11-01",
+      "allowed_licenses": ["cc-by"],
+      "minimum_interval_seconds": 1.0
+    }
+  ]
+}

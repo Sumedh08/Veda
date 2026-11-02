@@ -1,0 +1,35 @@
+# ADR-0033: Require free, structured-output-compatible OpenRouter routes and preserve partial research
+
+- **Status:** Offline provider/workflow fixes implemented. This ADR predates the live T-112 run; the later one-question attempt made three free-route requests, all truncated, and produced no accepted AI stage. See ADR-0034 and the T-112 quality review for superseding live evidence.
+- **Date:** 2026-10-30
+- **Decision owners:** Veda engineering
+
+## Context and evidence
+
+The one-time ten-case OpenRouter run used `openrouter/free`. It produced 20 persisted provider usage entries: two accepted planning responses from `nvidia/nemotron-3-ultra-550b-a55b:free` and 18 failures. All ten appraisal operations failed and each job stopped at appraisal. The saved usage and browser artifacts have no per-call provider error class, response finish reason, completion text, or accepted appraisal model identity. Historical failed rows show a synthetic `estimated_cost_usd: 0` beside missing reported cost; this is not proof of zero billing and reflects the earlier cost-recording path. Exact provider cause is therefore unknown.
+
+The pre-fix adapter required strict JSON Schema output but did not send OpenRouter's `provider.require_parameters`. Current OpenRouter documentation says structured-output support varies by endpoint and may change, and directs clients to use `require_parameters: true` to route only to endpoints supporting the requested parameters. OpenRouter also documents `max_tokens` as including reasoning tokens on most providers, so output exhaustion is plausible when a response is large; the preserved batch does not include finish reasons to establish truncation. See the official [Structured Outputs guide](https://openrouter.ai/docs/guides/features/structured-outputs), [Provider Routing guide](https://openrouter.ai/docs/guides/routing/provider-selection), and [Chat Completions parameters](https://openrouter.ai/docs/api/reference/parameters).
+
+The appraisal prompt requested version 1 in its instructions while validating response schema version 2, requested many unknown methodological fields, and omitted each claim's exact stored passage ID. These were compatibility/grounding defects found in the code, but the historical artifacts cannot show they caused the observed generic `model_call_uncertain` errors.
+
+## Decision
+
+- OpenRouter requests require parameters, disable provider fallbacks, and set request/prompt/completion maximum prices to zero. Successful responses must still identify a permitted free route and report zero cost; unexpected routes, positive/missing/invalid costs and uncertain outcomes are rejected. A response validation failure never disables schema validation.
+- Classify safe, bounded provider outcomes including unsupported response format (including HTTP-200 error envelopes), refusal/content filtering, output truncation, malformed provider JSON, schema mismatch, route change, and missing usage/cost. Never retain raw response bodies or upstream prose in error classifications.
+- Stop the current model-backed run after uncertain provider execution/cost or an unsupported/free-route guard failure. Do not automatically resend ambiguous POSTs. Keep the provider stop marker in the typed checkpoint and advance with explicit unknown appraisals, comparisons, and deterministic evidence-grounded report fallback where safe.
+- Keep source passages and extracted claims persisted when appraisal fails. A provider failure must not invalidate already committed evidence or citations.
+- Reduce appraisal output pressure by correcting the version instruction, including exact claim passage IDs, omitting unreported methodology facets, and constraining rationale length. Do not add multi-call appraisal batches yet: the old artifacts do not prove truncation, and splitting increases provider calls and can consume the bounded model budget before comparison/synthesis. Revisit with a fresh, separately authorized single-question run or a deterministic truncation fixture that demonstrates a budget-safe split strategy.
+- Keep missing failure cost metadata null and expose unknown-cost call counts and completeness in API/UI usage summaries. Do not convert unknown to zero.
+
+## Consequences and limits
+
+These changes make route support explicit, reject paid pricing before dispatch where the router honors its documented `max_price` contract, make subsequent response evidence diagnosable, and preserve a useful limited report on model failure. A zero-price routing cap is a request-side guard, not independent proof of account billing; record cost as unknown if no response cost is provided. Fixture success proves only adapter/workflow contracts. It does not prove that a live free model accepts Veda's schema, that model judgments are correct, or that output is scientifically reliable.
+
+For T-112, the user has separately authorized one local question. Public model/endpoint metadata was checked read-only at `evaluation/openrouter-t112-preflight-20261029T200048Z.json`: `nvidia/nemotron-3.5-super-vl:free` currently has an active NVIDIA `:free` endpoint supporting both `response_format` and `structured_outputs`; prompt/completion prices are zero and the request-price field is null. The request must still use `max_price` zero for prompt, completion, and request, require parameters, and disable provider fallbacks. The first metadata verifier incorrectly removed `:free` and inspected paid endpoint records; it now preserves the suffix and has a regression test. Route metadata must be rechecked immediately before dispatch. At the ADR-0033 checkpoint, T-112 stopped before inference because the credential was not staged; the user later supplied it for one authorized attempt. All three dispatched outputs truncated. B-007 and progress/results ledgers record the superseding outcome; no further request is authorized.
+
+## Verification
+
+- Offline adapter tests cover strict route parameters, free-price ceiling, disabled fallback, unsupported-format HTTP errors and HTTP-200 error envelopes, malformed provider JSON, schema-validation errors, refusal, content filtering, truncation, changed concrete free route, missing usage/cost, timeout and follow-up call blocking.
+- Full deterministic SQLite provider fixtures cover planning, Crossref discovery, extraction, passage-linked methodological appraisal, comparison, synthesis, semantic audit, citation integrity, report persistence and report inspection API.
+- Failure/recovery fixtures cover unsupported response format, timeout, null cost fields, preserved evidence, truthful not-performed judgments, citations to saved passages, deterministic report persistence, and continued workflow without another model call.
+- The initial T-112 runner attempt passed public route preflight but stopped before inference while the credential was unstaged. The user later staged it for one authorized attempt; the actual three model responses all truncated. See the superseding live review and ADR-0034. No valid model research output or scientific-quality result was established.

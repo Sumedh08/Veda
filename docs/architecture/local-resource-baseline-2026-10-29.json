@@ -1,0 +1,31 @@
+{
+  "measured_at_utc": "2026-10-29T01:32:20.9226368Z",
+  "operating_system": "Windows 11 Home Single Language",
+  "os_version": "10.0.26200",
+  "logical_processors": 8,
+  "physical_memory_mib": 7927,
+  "python": "Python 3.13.4",
+  "node": "v22.16.0",
+  "npm": "10.9.2",
+  "api": {
+    "name": "FastAPI + Uvicorn",
+    "ready_probe": "/api/v1/health/live",
+    "startup_to_http_2xx_ms": 4373,
+    "sampled_working_set_peak_mib": 98.7,
+    "sampling_window_seconds": 2,
+    "process_scope": "Sampled working set summed across launched process and descendants, excluding Windows conhost.exe; not kernel peak."
+  },
+  "frontend": {
+    "name": "Vite development server",
+    "ready_probe": "/",
+    "startup_to_http_2xx_ms": 1800,
+    "sampled_working_set_peak_mib": 159.9,
+    "sampling_window_seconds": 2,
+    "process_scope": "Sampled working set summed across launched process and descendants, excluding Windows conhost.exe; not kernel peak."
+  },
+  "limitations": [
+    "Single developer-machine observation; not hosted or container capacity evidence.",
+    "The liveness probe does not test database queries, migrations, auth-provider latency, or model-provider latency.",
+    "No scholarly host was contacted by the deterministic retrieval fixture suite."
+  ]
+}

@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "veda-api"
+version = "0.1.0"
+description = "Evidence-tracking research workspace API"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.13,<2",
+  "fastapi>=0.115,<1",
+  "httpx>=0.27,<1",
+  "PyJWT[crypto]>=2.9,<3",
+  "pydantic-settings>=2.5,<3",
+  "psycopg[binary]>=3.2,<4",
+  "pypdf>=6.21.4,<7",
+  "sqlalchemy>=2.0,<3",
+  "uvicorn[standard]>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27,<1",
+  "jsonschema>=4.23,<5",
+  "pytest>=9.0.3,<10",
+  "PyYAML>=6.0.2,<7",
+  "ruff>=0.6,<1",
+  "setuptools>=75",
+  "wheel",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008", "E501"] # FastAPI defaults and bounded prose/prompt literals are intentional.
+

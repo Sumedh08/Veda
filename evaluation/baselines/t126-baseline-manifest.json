@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "baseline_id": "T-126-GLM53-20261030",
+  "status": "preserved_read_only_reference",
+  "job_id": "67096439-7ea1-4605-9a1d-8dac76e5c9c3",
+  "report_id": "ab9eed84-eb89-4d33-a228-2eb34f762936",
+  "provider": "Sarvam Token Factory",
+  "model": "glm5.3-flash",
+  "captured_at": "2026-10-31",
+  "artifacts": [
+    {
+      "path": "evaluation/sarvam-glm53-research-20261030T211603703874Z.json",
+      "bytes": 1120728,
+      "sha256": "ad6ea7479ed72fcab557571d30babacd1cd76c5e6ad475261ba73443bb5de110"
+    },
+    {
+      "path": "evaluation/veda-sarvam-glm-20261030T211603703874Z.sqlite3",
+      "bytes": 827392,
+      "sha256": "4b42d9c3e1e9446866767c21cbb2ce0ed8400551195bd38fbcbce0b8c13425fc"
+    },
+    {
+      "path": "evaluation/t126-live-report-quality-review-2026-10-31.md",
+      "bytes": 8475,
+      "sha256": "8a7e7cb56283f5cd7bde2807a4242bc9873af06bb6eb7f85dbde4868fca7eae0"
+    }
+  ],
+  "limitations": [
+    "Artifact hashes preserve byte identity and detect later mutation; they do not authenticate the original run or establish scientific accuracy.",
+    "T-126 used abstract and metadata evidence only; it had no verified full-text Methods/Results passages.",
+    "The T-126 review was an engineering spot audit, not a blinded two-reviewer human benchmark packet."
+  ]
+}

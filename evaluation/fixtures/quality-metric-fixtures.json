@@ -1,0 +1,56 @@
+{
+  "fixture_version": 1,
+  "fixture_set_id": "veda_quality_metric_logic_v1",
+  "fixture_only": true,
+  "purpose": "Synthetic logic fixtures verify metric calculation and defect detection. They are not research outputs, gold answers, or human judgments.",
+  "cases": [
+    {
+      "case_id": "synthetic_mixed_quality",
+      "synthetic": true,
+      "claim_passage_ids": {
+        "C1": ["P1"],
+        "C2": ["P2"]
+      },
+      "citation_claim_ids": {
+        "S1": ["C1"],
+        "S2": ["C2"]
+      },
+      "report_items": [
+        {"item_id": "I1", "material": false, "claim_ids": ["C1"], "citation_ids": ["S1"]},
+        {"item_id": "F1", "material": true, "claim_ids": ["C1"], "citation_ids": ["S1"], "expected_support": "supported", "reported_support": "supported"},
+        {"item_id": "F2", "material": true, "claim_ids": ["C2"], "citation_ids": ["S2"], "expected_support": "partially_supported", "reported_support": "partially_supported"},
+        {"item_id": "F3", "material": true, "claim_ids": ["C1"], "citation_ids": ["S404"], "expected_support": "insufficient", "reported_support": "supported"}
+      ],
+      "required_material_item_ids": ["F1", "F2", "F3", "F4"],
+      "expected_scope_fields": ["population", "geography", "outcome", "time_period"],
+      "reported_scope_fields": ["population", "outcome", "time_period"],
+      "relationships": [
+        {"raw_relationship": "contradicts", "scope_alignment": "different", "scope_differences": ["population"], "stored_relationship": "heterogeneous"},
+        {"raw_relationship": "contradicts", "scope_alignment": "unknown", "scope_differences": [], "stored_relationship": "incomparable"},
+        {"raw_relationship": "contradicts", "scope_alignment": "same", "scope_differences": [], "stored_relationship": "contradicts"},
+        {"raw_relationship": "qualifies", "scope_alignment": "same", "scope_differences": [], "stored_relationship": "qualifies"},
+        {"raw_relationship": "contradicts", "scope_alignment": "different", "scope_differences": ["outcome"], "stored_relationship": "contradicts"}
+      ],
+      "competing_hypothesis_pairs": [
+        {"claim_ids_a": ["C1"], "claim_ids_b": ["C2"]},
+        {"claim_ids_a": ["C1", "C2"], "claim_ids_b": ["C2"]},
+        {"claim_ids_a": ["C1"], "claim_ids_b": ["C1"]}
+      ],
+      "provider_calls": [
+        {"cost_usd": 0.0, "budget_ceiling_usd": 0.0},
+        {"cost_usd": 0.02, "budget_ceiling_usd": 0.03},
+        {"cost_usd": 0.04, "budget_ceiling_usd": 0.03}
+      ]
+    }
+  ],
+  "expected_metric_counts": {
+    "passage_support_label_accuracy": {"numerator": 2, "denominator": 3},
+    "citation_link_integrity": {"numerator": 3, "denominator": 4},
+    "material_claim_coverage": {"numerator": 3, "denominator": 4},
+    "material_claim_citation_coverage": {"numerator": 2, "denominator": 3},
+    "scope_field_coverage": {"numerator": 3, "denominator": 4},
+    "scope_safe_relationship_classification": {"numerator": 4, "denominator": 5},
+    "competing_hypothesis_evidence_disjointness": {"numerator": 1, "denominator": 3},
+    "provider_call_budget_compliance": {"numerator": 2, "denominator": 3}
+  }
+}

@@ -1,0 +1,727 @@
+{
+  "registry_version": 1,
+  "created_date": "2026-10-28",
+  "status_note": "All cases are draft; no gold answers or researched source sets are asserted.",
+  "cases": [
+    {
+      "case_id": "DEV01",
+      "title": "Task speed vs end-to-end output",
+      "question": "Among experienced software developers, does a coding assistant increase task-level coding speed, and does that translate into end-to-end delivery throughput?",
+      "scope": "Workplace or controlled software-development tasks; separate coding speed from quality-adjusted delivery; specify tool and follow-up period.",
+      "expected_study_design": "Randomized crossover or cluster-randomized field study; measure accepted work through review, test, integration, and delivery, not typing time alone.",
+      "counterevidence_query": "Search for studies finding no end-to-end delivery gain, increased review/rework time, or benefits limited to selected tasks.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "task_vs_end_to_end_measurement",
+        "randomization_and_attrition",
+        "quality_adjusted_output",
+        "expertise_heterogeneity",
+        "replication_and_scope"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "DEV02",
+      "title": "Novice developers and code assistants",
+      "question": "How do code assistants affect novice developers' completion time, correctness, and later unaided skill on comparable programming tasks?",
+      "scope": "Workplace or controlled software-development tasks; separate coding speed from quality-adjusted delivery; specify tool and follow-up period.",
+      "expected_study_design": "Randomized controlled study with baseline skill strata, blinded code-quality review, delayed unaided transfer tasks, and preregistered outcomes.",
+      "counterevidence_query": "Search for null or negative effects on correctness, learning transfer, maintainability, and novice error rates.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "task_vs_end_to_end_measurement",
+        "randomization_and_attrition",
+        "quality_adjusted_output",
+        "expertise_heterogeneity",
+        "replication_and_scope"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "DEV03",
+      "title": "Expert developers and unfamiliar codebases",
+      "question": "Do experienced developers gain more from assistants on familiar code than when modifying unfamiliar legacy systems?",
+      "scope": "Workplace or controlled software-development tasks; separate coding speed from quality-adjusted delivery; specify tool and follow-up period.",
+      "expected_study_design": "Crossover experiment stratified by expertise and codebase familiarity, with independently rated correctness and integration time.",
+      "counterevidence_query": "Search for studies where context gathering, debugging, or code review erases initial generation-speed gains.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "task_vs_end_to_end_measurement",
+        "randomization_and_attrition",
+        "quality_adjusted_output",
+        "expertise_heterogeneity",
+        "replication_and_scope"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "DEV04",
+      "title": "Productivity measurement sensitivity",
+      "question": "How sensitive are reported developer productivity effects to using self-reported speed, task completion, accepted pull requests, or production outcomes?",
+      "scope": "Workplace or controlled software-development tasks; separate coding speed from quality-adjusted delivery; specify tool and follow-up period.",
+      "expected_study_design": "Measurement-comparison study or randomized trial reporting multiple preregistered productivity measures and attrition.",
+      "counterevidence_query": "Search for negative or null results on quality-adjusted output and end-to-end delivery despite positive self-reports.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "task_vs_end_to_end_measurement",
+        "randomization_and_attrition",
+        "quality_adjusted_output",
+        "expertise_heterogeneity",
+        "replication_and_scope"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SUP01",
+      "title": "Call-center handling time and resolution",
+      "question": "Does AI assistance reduce customer-support handling time while maintaining first-contact resolution and customer outcomes?",
+      "scope": "Customer-support work; distinguish worker productivity, resolution quality, customer outcomes, and staffing; specify setting and duration.",
+      "expected_study_design": "Cluster-randomized workplace trial with agent-level assignment and linked quality, repeat-contact, escalation, and satisfaction measures.",
+      "counterevidence_query": "Search for evidence of more repeat contacts, escalations, lower satisfaction, or gains explained by case-mix changes.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "worker_and_customer_outcomes",
+        "cluster_design_and_case_mix",
+        "quality_and_repeat_contacts",
+        "worker_heterogeneity",
+        "duration_and_external_validity"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SUP02",
+      "title": "Support workers by experience",
+      "question": "How does AI assistance change productivity and quality for novice versus experienced support agents?",
+      "scope": "Customer-support work; distinguish worker productivity, resolution quality, customer outcomes, and staffing; specify setting and duration.",
+      "expected_study_design": "Randomized field experiment with preregistered experience interactions and adequate cluster-level power.",
+      "counterevidence_query": "Search for evidence that experienced staff receive smaller gains, novices over-rely on suggestions, or quality falls in one group.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "worker_and_customer_outcomes",
+        "cluster_design_and_case_mix",
+        "quality_and_repeat_contacts",
+        "worker_heterogeneity",
+        "duration_and_external_validity"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SUP03",
+      "title": "Support quality and emotional labor",
+      "question": "Do AI-generated response suggestions improve service quality or mainly shift workload from typing to monitoring and emotional repair?",
+      "scope": "Customer-support work; distinguish worker productivity, resolution quality, customer outcomes, and staffing; specify setting and duration.",
+      "expected_study_design": "Mixed-method randomized field evaluation combining blinded conversation audits, workload measures, and worker interviews.",
+      "counterevidence_query": "Search for findings of increased monitoring burden, reduced empathy, or worse outcomes for complex or distressed customers.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "worker_and_customer_outcomes",
+        "cluster_design_and_case_mix",
+        "quality_and_repeat_contacts",
+        "worker_heterogeneity",
+        "duration_and_external_validity"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SUP04",
+      "title": "Support automation and staffing",
+      "question": "When support teams adopt generative AI, do firms serve more customers, reduce staffing, or change the mix of work over a year?",
+      "scope": "Customer-support work; distinguish worker productivity, resolution quality, customer outcomes, and staffing; specify setting and duration.",
+      "expected_study_design": "Longitudinal firm-level study with a credible comparison group, staffing/output measures, and explicit adoption timing.",
+      "counterevidence_query": "Search for studies showing no net output change, displaced work, rebound demand, or gains that fade after launch.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "worker_and_customer_outcomes",
+        "cluster_design_and_case_mix",
+        "quality_and_repeat_contacts",
+        "worker_heterogeneity",
+        "duration_and_external_validity"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SME01",
+      "title": "SME implementation overhead",
+      "question": "What one-time and recurring costs do small firms incur when implementing generative AI, including integration, governance, training, and oversight?",
+      "scope": "Small and medium-sized firms; count implementation and ongoing costs; distinguish private ROI from productivity and public support.",
+      "expected_study_design": "Prospective multi-firm implementation-cost study with transparent cost categories, denominators, and follow-up over at least 12 months.",
+      "counterevidence_query": "Search for negative ROI reports, omitted labor costs, implementation failures, and estimates excluding ongoing oversight.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "full_cost_denominator",
+        "counterfactual_and_selection",
+        "firm_size_and_sector_scope",
+        "duration_and_survival",
+        "uncertainty_and_sensitivity"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SME02",
+      "title": "SME return on AI investment",
+      "question": "Do small firms achieve positive risk-adjusted financial returns from generative AI adoption compared with similar non-adopters?",
+      "scope": "Small and medium-sized firms; count implementation and ongoing costs; distinguish private ROI from productivity and public support.",
+      "expected_study_design": "Matched longitudinal firm study or randomized adoption support with pre-specified financial outcomes and sensitivity analysis.",
+      "counterevidence_query": "Search for null/negative ROI, survivorship bias, capital costs, owner time, and results that do not generalize beyond early adopters.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "full_cost_denominator",
+        "counterfactual_and_selection",
+        "firm_size_and_sector_scope",
+        "duration_and_survival",
+        "uncertainty_and_sensitivity"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SME03",
+      "title": "SME budget and scale effects",
+      "question": "How do AI implementation costs and measured returns vary with firm size, baseline digital capability, and sector?",
+      "scope": "Small and medium-sized firms; count implementation and ongoing costs; distinguish private ROI from productivity and public support.",
+      "expected_study_design": "Stratified panel or natural experiment with size-by-capability interactions and consistent outcome definitions.",
+      "counterevidence_query": "Search for studies where small firms face fixed-cost disadvantages, cannot access complementary skills, or see no scale-adjusted gains.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "full_cost_denominator",
+        "counterfactual_and_selection",
+        "firm_size_and_sector_scope",
+        "duration_and_survival",
+        "uncertainty_and_sensitivity"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SME04",
+      "title": "AI adoption support programs",
+      "question": "Do grants, training, or technical-assistance programs cause sustained AI adoption and productivity gains among small firms?",
+      "scope": "Small and medium-sized firms; count implementation and ongoing costs; distinguish private ROI from productivity and public support.",
+      "expected_study_design": "Randomized or quasi-experimental evaluation of a defined support program with intention-to-treat and long-term outcomes.",
+      "counterevidence_query": "Search for low take-up, temporary adoption, displacement of private spending, or no productivity improvement after support ends.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "full_cost_denominator",
+        "counterfactual_and_selection",
+        "firm_size_and_sector_scope",
+        "duration_and_survival",
+        "uncertainty_and_sensitivity"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "REW01",
+      "title": "Hallucination-induced rework",
+      "question": "How often do AI-generated factual or coding errors create downstream rework, and what is the net time cost after checking and correction?",
+      "scope": "Human-AI workflows; record verification, correction, downstream quality, and error consequence; avoid self-reported productivity alone.",
+      "expected_study_design": "Controlled task experiment with blinded error taxonomy, time logs for checking and repair, and quality-adjusted net time.",
+      "counterevidence_query": "Search for settings with near-zero error correction cost and settings where subtle errors create larger downstream losses.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "independent_error_adjudication",
+        "verification_and_rework_cost",
+        "error_severity",
+        "causal_design",
+        "subgroup_and_time_effects"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "REW02",
+      "title": "Verification burden by task risk",
+      "question": "How does required human verification change the net productivity effect of AI assistance across low-risk and high-risk work?",
+      "scope": "Human-AI workflows; record verification, correction, downstream quality, and error consequence; avoid self-reported productivity alone.",
+      "expected_study_design": "Pre-registered randomized experiment stratified by consequence level and verification protocol; measure review time and error severity.",
+      "counterevidence_query": "Search for studies where review costs erase gains or where error rates remain unacceptable despite apparent speed improvements.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "independent_error_adjudication",
+        "verification_and_rework_cost",
+        "error_severity",
+        "causal_design",
+        "subgroup_and_time_effects"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "REW03",
+      "title": "AI errors and downstream quality",
+      "question": "Do AI-assisted workflows increase or decrease consequential error rates after independent quality review, rather than relying on user acceptance?",
+      "scope": "Human-AI workflows; record verification, correction, downstream quality, and error consequence; avoid self-reported productivity alone.",
+      "expected_study_design": "Randomized comparison with blinded expert adjudication, severity weighting, and audit of a representative output sample.",
+      "counterevidence_query": "Search for evidence of automation bias, false confidence, hidden error propagation, and adverse subgroup results.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "independent_error_adjudication",
+        "verification_and_rework_cost",
+        "error_severity",
+        "causal_design",
+        "subgroup_and_time_effects"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "REW04",
+      "title": "Learning to detect model errors",
+      "question": "Does repeated use improve workers' ability to detect AI errors, or does reliance reduce independent verification over time?",
+      "scope": "Human-AI workflows; record verification, correction, downstream quality, and error consequence; avoid self-reported productivity alone.",
+      "expected_study_design": "Longitudinal randomized or repeated-measures study with baseline and delayed error-detection tasks, use logs, and attrition analysis.",
+      "counterevidence_query": "Search for evidence of declining vigilance, no learning transfer, or gains limited to a narrow error category.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "independent_error_adjudication",
+        "verification_and_rework_cost",
+        "error_severity",
+        "causal_design",
+        "subgroup_and_time_effects"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SEL01",
+      "title": "Adoption selection bias",
+      "question": "Are firms that adopt AI already more productive or better managed before adoption, and how does accounting for this selection change estimated effects?",
+      "scope": "Firm or worker AI adoption; define treatment and adoption timing; assess selection, pre-trends, attrition, and plausible counterfactuals.",
+      "expected_study_design": "Panel-data event study or quasi-experiment with pre-trend checks, matching/weighting, and sensitivity to unobserved confounding.",
+      "counterevidence_query": "Search for pre-adoption productivity differences, null effects after selection adjustment, and negative-control outcomes.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "adoption_definition",
+        "pre_treatment_trends",
+        "confounding_and_reverse_causality",
+        "attrition_and_survival",
+        "sensitivity_and_negative_controls"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SEL02",
+      "title": "Worker self-selection into tools",
+      "question": "Do voluntary users of AI tools differ from non-users in skill, motivation, task mix, or manager support in ways that bias productivity comparisons?",
+      "scope": "Firm or worker AI adoption; define treatment and adoption timing; assess selection, pre-trends, attrition, and plausible counterfactuals.",
+      "expected_study_design": "Randomized access or instrumental-variable design with baseline measures and an explicit treatment-on-treated estimand.",
+      "counterevidence_query": "Search for evidence that observed gains disappear under random assignment or are concentrated in high-skill volunteers.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "adoption_definition",
+        "pre_treatment_trends",
+        "confounding_and_reverse_causality",
+        "attrition_and_survival",
+        "sensitivity_and_negative_controls"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SEL03",
+      "title": "Firm survival and reporting bias",
+      "question": "How do firm closures, nonresponse, and selective publication affect estimates of productivity after AI adoption?",
+      "scope": "Firm or worker AI adoption; define treatment and adoption timing; assess selection, pre-trends, attrition, and plausible counterfactuals.",
+      "expected_study_design": "Longitudinal cohort analysis with attrition bounds, closure tracking, registered outcomes, and sensitivity analyses.",
+      "counterevidence_query": "Search for non-adopters and failed adopters, publication-bias evidence, and estimates including firms that exited.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "adoption_definition",
+        "pre_treatment_trends",
+        "confounding_and_reverse_causality",
+        "attrition_and_survival",
+        "sensitivity_and_negative_controls"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "SEL04",
+      "title": "Adoption timing and reverse causality",
+      "question": "Do productivity improvements precede AI adoption, or does adoption cause subsequent changes in firm performance?",
+      "scope": "Firm or worker AI adoption; define treatment and adoption timing; assess selection, pre-trends, attrition, and plausible counterfactuals.",
+      "expected_study_design": "Quasi-experimental timing design with pre-treatment trend tests, adoption dates, and plausible instruments or policy variation.",
+      "counterevidence_query": "Search for evidence of reverse causality, anticipation effects, and outcomes that improve before reported adoption.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "adoption_definition",
+        "pre_treatment_trends",
+        "confounding_and_reverse_causality",
+        "attrition_and_survival",
+        "sensitivity_and_negative_controls"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "LAB01",
+      "title": "Task complementarity and substitution",
+      "question": "Within occupations exposed to generative AI, which tasks are complemented, automated, or newly created, and what happens to total labor demand?",
+      "scope": "Workers and exposed tasks; separate task exposure from occupation/job outcomes; inspect distributional effects and time horizon.",
+      "expected_study_design": "Task-level exposure linked to longitudinal worker/firm data, with occupation and industry heterogeneity and a credible counterfactual.",
+      "counterevidence_query": "Search for employment increases in exposed tasks, task reallocation without job loss, and evidence of substitution in affected groups.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "task_vs_job_outcomes",
+        "worker_transition_and_distribution",
+        "credible_counterfactual",
+        "horizon_and_labor_inputs",
+        "subgroup_power"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "LAB02",
+      "title": "Wages and bargaining outcomes",
+      "question": "Does workplace AI adoption affect wages, hours, job quality, or bargaining power for workers doing AI-exposed tasks?",
+      "scope": "Workers and exposed tasks; separate task exposure from occupation/job outcomes; inspect distributional effects and time horizon.",
+      "expected_study_design": "Linked employer-employee panel or natural experiment measuring distributional outcomes before and after adoption.",
+      "counterevidence_query": "Search for wage declines, intensified work, reduced autonomy, or gains captured by employers rather than workers.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "task_vs_job_outcomes",
+        "worker_transition_and_distribution",
+        "credible_counterfactual",
+        "horizon_and_labor_inputs",
+        "subgroup_power"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "LAB03",
+      "title": "Job displacement and transition",
+      "question": "What evidence distinguishes near-term job displacement from task redesign and longer-term occupational transition after AI adoption?",
+      "scope": "Workers and exposed tasks; separate task exposure from occupation/job outcomes; inspect distributional effects and time horizon.",
+      "expected_study_design": "Longitudinal administrative labor data with task exposure, worker transitions, and pre-specified horizons.",
+      "counterevidence_query": "Search for concentrated displacement, slow reemployment, wage scarring, and geographic or demographic disparities.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "task_vs_job_outcomes",
+        "worker_transition_and_distribution",
+        "credible_counterfactual",
+        "horizon_and_labor_inputs",
+        "subgroup_power"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "LAB04",
+      "title": "Complementarity by skill and occupation",
+      "question": "Which worker groups benefit from AI complementarity, and which face substitution or barriers to using the technology effectively?",
+      "scope": "Workers and exposed tasks; separate task exposure from occupation/job outcomes; inspect distributional effects and time horizon.",
+      "expected_study_design": "Heterogeneous-treatment analysis with pre-specified skill, occupation, and access groups plus adequate subgroup power.",
+      "counterevidence_query": "Search for negative subgroup effects, skill-biased gains, unequal access, and studies finding no meaningful interaction.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "task_vs_job_outcomes",
+        "worker_transition_and_distribution",
+        "credible_counterfactual",
+        "horizon_and_labor_inputs",
+        "subgroup_power"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "AGG01",
+      "title": "Task gains vs firm productivity",
+      "question": "Do measured improvements in selected tasks aggregate into firm-level productivity growth after integration, management, and demand effects?",
+      "scope": "Firm and industry outcomes; report output, inputs, quality, market reallocation, and productivity denominator separately.",
+      "expected_study_design": "Firm-level randomized or quasi-experimental evaluation linked to process-level measures and a consistent productivity denominator.",
+      "counterevidence_query": "Search for the productivity paradox: task speed gains without changes in firm output, total factor productivity, or costs.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "productivity_denominator",
+        "output_quality_and_inputs",
+        "within_firm_vs_reallocation",
+        "causal_identification",
+        "firm_size_and_sector_scope"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "AGG02",
+      "title": "Output vs labor productivity",
+      "question": "How do AI-related output changes differ from labor-productivity changes when firms alter hours, staffing, quality, or product mix?",
+      "scope": "Firm and industry outcomes; report output, inputs, quality, market reallocation, and productivity denominator separately.",
+      "expected_study_design": "Firm panel or field experiment that reports output, labor inputs, quality, and composition separately.",
+      "counterevidence_query": "Search for output growth driven by longer hours, lower quality, workforce reductions, or changing customer and product mix.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "productivity_denominator",
+        "output_quality_and_inputs",
+        "within_firm_vs_reallocation",
+        "causal_identification",
+        "firm_size_and_sector_scope"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "AGG03",
+      "title": "Productivity diffusion and firm size",
+      "question": "Are AI productivity gains concentrated among frontier firms, or do they diffuse to typical firms and smaller organizations?",
+      "scope": "Firm and industry outcomes; report output, inputs, quality, market reallocation, and productivity denominator separately.",
+      "expected_study_design": "Representative firm survey linked to administrative outcomes or a diffusion panel with firm-size and capability strata.",
+      "counterevidence_query": "Search for non-adoption, implementation gaps, or a widening frontier-to-laggard productivity gap.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "productivity_denominator",
+        "output_quality_and_inputs",
+        "within_firm_vs_reallocation",
+        "causal_identification",
+        "firm_size_and_sector_scope"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "AGG04",
+      "title": "Aggregate productivity and reallocation",
+      "question": "How much of observed aggregate productivity change after AI adoption reflects within-firm improvement versus market-share reallocation and firm entry/exit?",
+      "scope": "Firm and industry outcomes; report output, inputs, quality, market reallocation, and productivity denominator separately.",
+      "expected_study_design": "Industry-level decomposition with firm microdata, entry/exit, market shares, and a credible adoption exposure strategy.",
+      "counterevidence_query": "Search for effects driven by reallocation rather than within-firm gains and for sectors with negative aggregate outcomes.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "productivity_denominator",
+        "output_quality_and_inputs",
+        "within_firm_vs_reallocation",
+        "causal_identification",
+        "firm_size_and_sector_scope"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "TIME01",
+      "title": "Short-run novelty effects",
+      "question": "Do productivity gains measured in the first weeks of AI tool use persist after the novelty and learning period?",
+      "scope": "Short- through long-term outcomes; specify baseline, adoption phase, tool version, follow-up window, and adaptation cost.",
+      "expected_study_design": "Longitudinal randomized field trial with repeated measures, baseline, adaptation phase, and follow-up beyond initial deployment.",
+      "counterevidence_query": "Search for fading treatment effects, usage decline, or reversal after early novelty gains.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "baseline_and_follow_up",
+        "learning_and_complementary_inputs",
+        "deployment_measurement",
+        "causal_identification",
+        "durability_and_replication"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "TIME02",
+      "title": "Learning curves and ramp-up cost",
+      "question": "How long does it take workers to become effective with an AI-assisted workflow, and what are the productivity costs during the learning period?",
+      "scope": "Short- through long-term outcomes; specify baseline, adoption phase, tool version, follow-up window, and adaptation cost.",
+      "expected_study_design": "Longitudinal cohort or stepped-wedge design reporting time-to-proficiency, training time, and interim quality-adjusted output.",
+      "counterevidence_query": "Search for persistent learning costs, uneven proficiency, and gains restricted to workers with prior digital skills.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "baseline_and_follow_up",
+        "learning_and_complementary_inputs",
+        "deployment_measurement",
+        "causal_identification",
+        "durability_and_replication"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "TIME03",
+      "title": "Long-run organizational effects",
+      "question": "What long-run productivity and cost changes follow AI deployment after process redesign, governance, and complementary investment?",
+      "scope": "Short- through long-term outcomes; specify baseline, adoption phase, tool version, follow-up window, and adaptation cost.",
+      "expected_study_design": "Multi-year firm panel or natural experiment with deployment milestones and changing organizational practices measured.",
+      "counterevidence_query": "Search for delayed costs, failed implementations, declining returns, or outcomes that cannot be attributed to AI alone.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "baseline_and_follow_up",
+        "learning_and_complementary_inputs",
+        "deployment_measurement",
+        "causal_identification",
+        "durability_and_replication"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "TIME04",
+      "title": "Durability across model changes",
+      "question": "Do productivity findings replicate when AI tools, models, and worker workflows change over time?",
+      "scope": "Short- through long-term outcomes; specify baseline, adoption phase, tool version, follow-up window, and adaptation cost.",
+      "expected_study_design": "Repeated multi-period evaluation with versioned system exposure, stable outcomes, and replication across cohorts.",
+      "counterevidence_query": "Search for non-replication across model versions, tool changes, or cohorts and for benchmark-to-workplace gaps.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "baseline_and_follow_up",
+        "learning_and_complementary_inputs",
+        "deployment_measurement",
+        "causal_identification",
+        "durability_and_replication"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "GEN01",
+      "title": "Sector generalization",
+      "question": "Can productivity estimates from technology firms or office tasks be generalized to healthcare, education, manufacturing, or public services?",
+      "scope": "External validity or evidence-bias question; specify sectors, geography, source type, and distinction between forecast and observed outcomes.",
+      "expected_study_design": "External-validity study with harmonized outcomes across sectors and explicit implementation and regulatory differences.",
+      "counterevidence_query": "Search for sector-specific null effects, safety costs, regulatory constraints, and differences in task composition.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "primary_vs_forecast_evidence",
+        "sample_representativeness",
+        "sector_geography_scope",
+        "negative_evidence_search",
+        "conflicts_and_transparency"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "GEN02",
+      "title": "Geographic generalization",
+      "question": "How do AI productivity and ROI estimates vary across countries with different wages, infrastructure, language coverage, and firm composition?",
+      "scope": "External validity or evidence-bias question; specify sectors, geography, source type, and distinction between forecast and observed outcomes.",
+      "expected_study_design": "Cross-country comparative study or coordinated multi-country field experiment with measurement harmonization.",
+      "counterevidence_query": "Search for lower returns in low-resource languages, infrastructure-constrained settings, or countries with different labor costs.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "primary_vs_forecast_evidence",
+        "sample_representativeness",
+        "sector_geography_scope",
+        "negative_evidence_search",
+        "conflicts_and_transparency"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "GEN03",
+      "title": "Consulting extrapolation audit",
+      "question": "How do consulting estimates of enterprise AI ROI compare with transparent primary studies using observable costs, denominators, and follow-up?",
+      "scope": "External validity or evidence-bias question; specify sectors, geography, source type, and distinction between forecast and observed outcomes.",
+      "expected_study_design": "Independent estimate audit tracing assumptions to primary data and comparing with representative firm-level evaluations.",
+      "counterevidence_query": "Search for primary studies with lower or null returns, undisclosed samples, vendor conflicts, and forecasts not yet realized.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "primary_vs_forecast_evidence",
+        "sample_representativeness",
+        "sector_geography_scope",
+        "negative_evidence_search",
+        "conflicts_and_transparency"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    },
+    {
+      "case_id": "GEN04",
+      "title": "Negative and unpublished evidence",
+      "question": "What negative, null, or unpublished findings are missing from public narratives about AI productivity and adoption?",
+      "scope": "External validity or evidence-bias question; specify sectors, geography, source type, and distinction between forecast and observed outcomes.",
+      "expected_study_design": "Systematic evidence search with registry, working-paper, and attrition scans plus publication-bias sensitivity analysis.",
+      "counterevidence_query": "Search repositories and registries for stopped trials, null results, implementation failures, and outcomes omitted from published reports.",
+      "candidate_primary_sources": [],
+      "source_search_status": "not_researched",
+      "rubric_dimensions": [
+        "primary_vs_forecast_evidence",
+        "sample_representativeness",
+        "sector_geography_scope",
+        "negative_evidence_search",
+        "conflicts_and_transparency"
+      ],
+      "gold_answer": null,
+      "status": "draft",
+      "review_notes": "Question design only. No answer, primary-source set, or performance label has been human-reviewed."
+    }
+  ]
+}

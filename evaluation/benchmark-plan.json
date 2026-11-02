@@ -1,0 +1,237 @@
+{
+  "protocol_version": 1,
+  "protocol_status": "pre_registered_pilot_pending_source_review_and_human_review",
+  "locked_date": "2026-10-29",
+  "registry_path": "evaluation/questions/ai_economics_cases.json",
+  "registry_version": 1,
+  "cutoff_date": "2026-10-29",
+  "candidate_evidence_note": "docs/research/ai-work-economics-evidence-sample-2026-10-29.md",
+  "purpose": "Evaluate a small, fixed pilot of Veda research reports against primary empirical studies and independent human review. This is not a representative sample and cannot support a population-wide accuracy claim.",
+  "selection_method": {
+    "type": "purposive_stratified_fixed_pilot",
+    "case_count": 7,
+    "selection_locked_before_any_new_veda_run_or_annotation": true,
+    "selection_basis": "Cover distinct research tasks and intentionally include positive, null or heterogeneous, and negative evidence. Include both task-level and organizational outcomes; prefer primary empirical work with identifiable populations, designs, outcomes, and accessible source text.",
+    "anti_selection_rules": [
+      "Do not replace a selected case after observing Veda output or scores.",
+      "If a selected case or candidate source proves unusable, record the reason and retain it as missing or protocol deviation; any replacement must be added as a dated amendment before its run.",
+      "Do not treat the selected cases as random, representative, or exhaustive.",
+      "Do not turn these source mappings into gold answers; reviewers must independently inspect the actual source and report."
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "DEV01",
+      "stratum": "software-development task speed and throughput",
+      "reason_selected": "A controlled coding study offers a positive/task-level contrast against the selected negative experienced-developer study; prevent coding speed from being equated with end-to-end delivery.",
+      "candidate_primary_sources": [
+        {
+          "source_id": "PENG-2023-COPILOT-RCT",
+          "citation": "Peng et al. (2023), The Impact of AI on Developer Productivity: Evidence from GitHub Copilot",
+          "doi": "10.48550/arXiv.2302.06590",
+          "url": "https://doi.org/10.48550/arXiv.2302.06590",
+          "source_role": "primary randomized controlled coding experiment",
+          "access_status": "arXiv v1 metadata, HTML/PDF access, and version checked; full-text methodological review pending; downstream reuse rights not established"
+        }
+      ]
+    },
+    {
+      "case_id": "DEV04",
+      "stratum": "measurement sensitivity and negative developer result",
+      "reason_selected": "The primary RCT compares experienced developers' expectations with observed task completion time, testing whether perceived productivity and measured completion diverge.",
+      "candidate_primary_sources": [
+        {
+          "source_id": "BECKER-2025-METR-RCT",
+          "citation": "Becker et al. (2025), Measuring the Impact of Early-2025 AI on Experienced Open-Source Developer Productivity",
+          "doi": "10.48550/arXiv.2507.09089",
+          "url": "https://doi.org/10.48550/arXiv.2507.09089",
+          "source_role": "primary randomized controlled trial on experienced open-source developers",
+          "access_status": "arXiv v2 metadata, HTML/PDF access, and CC BY 4.0 terms checked; full-text methodological review and independent gold-source validation pending"
+        }
+      ]
+    },
+    {
+      "case_id": "GEN01",
+      "stratum": "generalization boundary across professional work",
+      "reason_selected": "Professional writing tasks provide evidence for one bounded domain and test whether a system improperly generalizes the estimate to sectors or occupations not studied.",
+      "candidate_primary_sources": [
+        {
+          "source_id": "NOY-ZHANG-2023-WRITING-RCT",
+          "citation": "Noy and Zhang (2023), Experimental Evidence on the Productivity Effects of Generative Artificial Intelligence",
+          "doi": "10.1126/science.adh2586",
+          "url": "https://doi.org/10.1126/science.adh2586",
+          "source_role": "primary preregistered randomized professional-writing experiment",
+          "access_status": "Science final-article DOI path returned HTTP 403 in this audit; accessible MIT working-paper PDF is a distinct 2023 non-peer-reviewed version (n=444); final-version full text, equivalence, and reuse rights unresolved"
+        }
+      ]
+    },
+    {
+      "case_id": "GEN03",
+      "stratum": "consulting evidence and conditional task performance",
+      "reason_selected": "A randomized experiment among knowledge workers supports checking task-specific benefits, quality, and failures without extrapolating bounded consultant tasks to enterprise ROI.",
+      "candidate_primary_sources": [
+        {
+          "source_id": "DELLACQUA-2026-JAGGED-FRONTIER-RCT",
+          "citation": "Dell’Acqua et al. (2026), Navigating the Jagged Technological Frontier: Field Experimental Evidence of the Effects of Artificial Intelligence on Knowledge Worker Productivity and Quality",
+          "doi": "10.1287/orsc.2025.21838",
+          "url": "https://doi.org/10.1287/orsc.2025.21838",
+          "source_role": "primary preregistered randomized field experiment of knowledge workers",
+          "access_status": "2026 publisher version and publisher HTML/PDF access checked; CC BY 4.0 stated; independent gold-source validation and embedded-third-party screening pending"
+        }
+      ]
+    },
+    {
+      "case_id": "SUP01",
+      "stratum": "customer-support throughput and quality outcomes",
+      "reason_selected": "A workplace deployment with agent-level operational outcomes tests handling throughput and broader customer/worker measures beyond bounded laboratory tasks.",
+      "candidate_primary_sources": [
+        {
+          "source_id": "BRYNJOLFSSON-2025-SUPPORT-STUDY",
+          "citation": "Brynjolfsson, Li, and Raymond (2025), Generative AI at Work",
+          "doi": "10.1093/qje/qjae044",
+          "url": "https://doi.org/10.1093/qje/qjae044",
+          "source_role": "primary workplace study of a staggered assistant rollout among customer-support agents",
+          "access_status": "publisher full text reported open; verify exact paper version and inspect limitations"
+        }
+      ]
+    },
+    {
+      "case_id": "SUP02",
+      "stratum": "worker-experience heterogeneity",
+      "reason_selected": "The same prespecified support study has experience-stratified outcomes, allowing a second case to test whether Veda distinguishes average from subgroup results without treating correlated cases as independent studies.",
+      "candidate_primary_sources": [
+        {
+          "source_id": "BRYNJOLFSSON-2025-SUPPORT-STUDY",
+          "citation": "Brynjolfsson, Li, and Raymond (2025), Generative AI at Work",
+          "doi": "10.1093/qje/qjae044",
+          "url": "https://doi.org/10.1093/qje/qjae044",
+          "source_role": "same primary workplace study as SUP01; dependent case/source reuse is explicitly recorded",
+          "access_status": "publisher article/version and full-text access checked; CC BY-NC 4.0 stated; use-specific noncommercial classification pending; same study maps SUP01 and SUP02"
+        }
+      ]
+    },
+    {
+      "case_id": "SME02",
+      "stratum": "small-firm financial return and heterogeneous null result",
+      "reason_selected": "A field experiment measures business performance and exposes a null average effect with baseline-performance heterogeneity; test whether Veda preserves the denominator, uncertainty, and subgroup qualification.",
+      "candidate_primary_sources": [
+        {
+          "source_id": "OTIS-2026-KENYA-ENTREPRENEUR-RCT",
+          "citation": "Otis et al. (2026), The Uneven Impact of Generative Artificial Intelligence on Entrepreneurial Performance: Evidence from a Field Experiment in Kenya",
+          "doi": "10.1287/mnsc.2024.06909",
+          "url": "https://doi.org/10.1287/mnsc.2024.06909",
+          "source_role": "primary randomized field experiment with small-business entrepreneurs",
+          "access_status": "2026 publisher Articles-in-Advance version and publisher HTML/PDF access checked; CC BY 4.0 stated; earlier manuscript not version-matched; independent gold-source validation pending"
+        }
+      ]
+    }
+  ],
+  "source_inclusion_exclusion": {
+    "include": [
+      "Primary empirical studies that report their own data, sample, design, intervention/exposure, comparator, outcome, and limits relevant to the selected case.",
+      "Versioned author manuscripts or publisher versions only when the precise version and access class are recorded.",
+      "A source can be used as a counterexample or scope boundary even when it does not directly answer the selected question, but that role must be explicit."
+    ],
+    "exclude_from_primary_evidence_set": [
+      "Press releases, news, consultancy estimates, narrative summaries, and secondary reviews (may be logged as discovery leads but not as primary evidence).",
+      "Abstract-only records when a passage-level claim or method requires unavailable full text; retain them with abstract-only access status, not as full-text reviewed.",
+      "Sources whose identity, version, population, comparator, or outcome cannot be verified.",
+      "Any material whose retrieval/reuse permission is unknown when the proposed use would require storing or reproducing full text. Metadata-only use may remain separately labeled."
+    ],
+    "per_source_required_review": [
+      "canonical identifier and version",
+      "study design and assignment/identification method",
+      "sample and setting",
+      "treatment/exposure and comparator",
+      "outcomes, denominators, and uncertainty",
+      "limitations, missingness, conflicts/funding where disclosed",
+      "access class, license/retrieval rights, and passages actually inspected"
+    ]
+  },
+  "run_capture": {
+    "one_run_per_case_initially": true,
+    "freeze_before_run": [
+      "case JSON and exact question/scope",
+      "application source revision or source-tree SHA-256 manifest when Git revision is unavailable",
+      "provider, model identifier, provider-reported model version, prompt/schema versions, depth profile, source limits, and execution date",
+      "candidate-source set version and access status",
+      "query and provider-call ledger, including failed/empty queries",
+      "all immutable report, source, passage, claim, comparison, citation-audit, and usage artifacts"
+    ],
+    "secrets": "Never store API keys, bearer tokens, personal reviewer identities, or raw authorization headers in the run manifest.",
+    "cost": "Capture provider-reported amounts and token usage separately from local estimates. Unknown is not zero. A run without a verifiable provider cost observation remains cost-missing."
+  },
+  "review": {
+    "independent_reviewers_per_case_run": 2,
+    "reviewers": "Use two independent reviewers with relevant subject/method expertise. Store only an assigned pseudonym, role, expertise area, date, and conflict declaration in records; keep identity mapping outside the repository.",
+    "blindness": "Reviewers score independently before seeing each other's scores or any consensus summary. They inspect the report and underlying source/passage, not only citation presence or model labels.",
+    "adjudication": "Log disagreements by dimension and finding; a third qualified reviewer resolves material disagreements. Preserve both original records. Do not overwrite independent scores with consensus.",
+    "record_schema": "evaluation/schemas/annotation-record.schema.json",
+    "synthetic_fixture": "evaluation/annotations/schema-only-example.json is solely a schema fixture and is never included in the human-reviewed denominator."
+  },
+  "metrics": [
+    {
+      "id": "primary_source_retrieval_recall_at_k",
+      "numerator": "reviewer-confirmed eligible primary studies in the predeclared case source set retrieved and correctly identified in the Veda run's top k",
+      "denominator": "eligible primary studies in that case's final reviewer-validated source set",
+      "rule": "A source is not eligible solely because it appears in this candidate file; reviewers may exclude it with reason before examining run scores. Report missing/unavailable studies and denominators explicitly."
+    },
+    {
+      "id": "claim_passage_support",
+      "numerator": "sampled material report claims independently judged substantively supported by the cited saved source passage at the stated scope",
+      "denominator": "all sampled material claims, including unsupported, wrong-source, missing-passage, and not-assessable items, each disposition reported separately"
+    },
+    {
+      "id": "material_claim_citation_coverage",
+      "numerator": "material factual claims with a resolvable, relevant source and passage",
+      "denominator": "all material factual claims independently identified in the report"
+    },
+    {
+      "id": "scope_and_design_fidelity",
+      "numerator": "reviewed claims that preserve study population, setting, design, comparator, outcomes, denominator, and horizon as applicable",
+      "denominator": "all reviewed claims where those dimensions are assessable; publish dimension-specific missing/N/A counts"
+    },
+    {
+      "id": "counterevidence_omission",
+      "numerator": "reviewer-identified eligible counterevidence sources or material findings surfaced with accurate scope",
+      "denominator": "all reviewer-identified eligible counterevidence sources or material findings in the frozen set"
+    },
+    {
+      "id": "human_rubric_scores_and_disagreement",
+      "numerator": "independent 0-3 score counts/sums per dimension",
+      "denominator": "reviewer-by-case-run score records per dimension; N/A is excluded from the numeric mean and reported separately"
+    },
+    {
+      "id": "provider_cost_per_completed_run",
+      "numerator": "provider-reported cost for that immutable run; separately report any estimate",
+      "denominator": "completed runs with an observed provider-reported cost; missing-cost runs are counted separately and never assigned zero"
+    }
+  ],
+  "aggregation_and_interpretation": {
+    "case_run_is_unit": true,
+    "same_source_reuse": "SUP01 and SUP02 share a study and are not independent evidence replications; show per-case results but do not count them as two independent studies.",
+    "publish": "Include case selection, source inclusion/exclusion, run failures, missing data, all dimension denominators, reviewer disagreements, adjudications, access class, provider/model versions, and cost coverage.",
+    "prohibited_claims": [
+      "Do not call synthetic fixtures a research-quality benchmark.",
+      "Do not call this seven-case purposive pilot an accuracy rate or general performance estimate.",
+      "Do not claim expert review, source recall, support, omission, or cost scores before actual runs and independent reviewers exist.",
+      "Do not equate schema validation or an automated semantic audit with human verification."
+    ]
+  },
+  "current_state": {
+    "primary_source_review_complete": false,
+    "source_set_finalized": false,
+    "veda_runs_completed": 0,
+    "independent_human_reviews_completed": 0,
+    "quality_scores_reported": false,
+    "open_requirements": [
+      "Case-specific content review and independent gold-source validation remain pending; Noy–Zhang final Science full text/version/terms are unresolved, and Brynjolfsson passage use requires a Veda-specific noncommercial-use determination or permission. See the candidate metadata/version/access screen note.",
+      "Run one complete Veda job for every selected case with a newly rotated, securely configured free-model credential and zero-cost enforcement; do not reuse the key exposed in chat.",
+      "Obtain two independent qualified reviewers per completed case-run, then preserve disagreements and adjudication records.",
+      "Populate results with observed run artifacts and explicit numerators and denominators."
+    ],
+    "candidate_source_metadata_screened": true,
+    "candidate_source_screen_date": "2026-10-29",
+    "candidate_source_screen_note": "docs/research/benchmark-source-version-rights-audit-2026-10-29.md"
+  }
+}

@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veda.local/schemas/research-annotation-record-v1.json",
+  "title": "Veda human research-output annotation record",
+  "description": "One independent human review of one immutable Veda run for one benchmark case. A structurally valid record does not establish that the review is genuine or that the output is correct.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_id",
+    "case_id",
+    "run_id",
+    "run_manifest_sha256",
+    "review_status",
+    "reviewer",
+    "review_date",
+    "provider",
+    "model",
+    "model_version",
+    "source_set_version",
+    "cost_observation",
+    "scores",
+    "citation_findings",
+    "uncited_claim_findings",
+    "scope_notes",
+    "limitations_and_omissions",
+    "adjudication"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "record_id": {"type": "string", "pattern": "^ANN-[A-Z0-9][A-Z0-9_-]{2,63}$"},
+    "case_id": {"type": "string", "pattern": "^[A-Z]{3}[0-9]{2}$"},
+    "run_id": {"type": ["string", "null"], "minLength": 1},
+    "run_manifest_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+    "review_status": {"enum": ["not_reviewed", "in_progress", "complete"]},
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pseudonym", "role", "expertise_area", "conflict_declared", "conflict_notes"],
+      "properties": {
+        "pseudonym": {"type": ["string", "null"], "minLength": 2, "maxLength": 80},
+        "role": {"type": ["string", "null"], "minLength": 2, "maxLength": 120},
+        "expertise_area": {"type": ["string", "null"], "minLength": 2, "maxLength": 240},
+        "conflict_declared": {"type": ["boolean", "null"]},
+        "conflict_notes": {"type": ["string", "null"], "maxLength": 2000}
+      }
+    },
+    "review_date": {"type": ["string", "null"], "format": "date"},
+    "provider": {"type": ["string", "null"], "minLength": 1, "maxLength": 80},
+    "model": {"type": ["string", "null"], "minLength": 1, "maxLength": 160},
+    "model_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 160},
+    "source_set_version": {"type": ["string", "null"], "minLength": 1, "maxLength": 100},
+    "cost_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "amount", "reported_by_provider", "input_tokens", "output_tokens", "status"],
+      "properties": {
+        "currency": {"type": ["string", "null"], "pattern": "^[A-Z]{3}$"},
+        "amount": {"type": ["number", "null"], "minimum": 0},
+        "reported_by_provider": {"type": ["boolean", "null"]},
+        "input_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "output_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "status": {"enum": ["not_observed", "observed", "provider_reported", "estimated", "unknown"]}
+      }
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question_scope_fit",
+        "source_provenance_access",
+        "claim_passage_support",
+        "study_design_interpretation",
+        "outcome_denominator",
+        "uncertainty_limitations",
+        "counterevidence_heterogeneity",
+        "conclusion_calibration",
+        "usefulness_traceability"
+      ],
+      "properties": {
+        "question_scope_fit": {"$ref": "#/$defs/score"},
+        "source_provenance_access": {"$ref": "#/$defs/score"},
+        "claim_passage_support": {"$ref": "#/$defs/score"},
+        "study_design_interpretation": {"$ref": "#/$defs/score"},
+        "outcome_denominator": {"$ref": "#/$defs/score"},
+        "uncertainty_limitations": {"$ref": "#/$defs/score"},
+        "counterevidence_heterogeneity": {"$ref": "#/$defs/score"},
+        "conclusion_calibration": {"$ref": "#/$defs/score"},
+        "usefulness_traceability": {"$ref": "#/$defs/score"}
+      }
+    },
+    "score_rationales": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "question_scope_fit": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "source_provenance_access": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "claim_passage_support": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "study_design_interpretation": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "outcome_denominator": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "uncertainty_limitations": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "counterevidence_heterogeneity": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "conclusion_calibration": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "usefulness_traceability": {"type": "string", "minLength": 1, "maxLength": 3000}
+      }
+    },
+    "na_rationales": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "question_scope_fit": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "source_provenance_access": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "claim_passage_support": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "study_design_interpretation": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "outcome_denominator": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "uncertainty_limitations": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "counterevidence_heterogeneity": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "conclusion_calibration": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "usefulness_traceability": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    },
+    "citation_findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "uncited_claim_findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "scope_notes": {"type": "string", "maxLength": 10000},
+    "limitations_and_omissions": {"type": "string", "maxLength": 10000},
+    "adjudication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "decision", "notes", "reviewer_count"],
+      "properties": {
+        "status": {"enum": ["not_started", "pending", "adjudicated", "not_required"]},
+        "decision": {"type": ["string", "null"], "maxLength": 3000},
+        "notes": {"type": "string", "maxLength": 5000},
+        "reviewer_count": {"type": ["integer", "null"], "minimum": 0}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"review_status": {"const": "complete"}}, "required": ["review_status"]},
+      "then": {
+        "properties": {
+          "run_id": {"type": "string", "minLength": 1},
+          "run_manifest_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "review_date": {"type": "string", "format": "date"},
+          "provider": {"type": "string", "minLength": 1},
+          "model": {"type": "string", "minLength": 1},
+          "model_version": {"type": "string", "minLength": 1},
+          "source_set_version": {"type": "string", "minLength": 1},
+          "reviewer": {
+            "properties": {
+              "pseudonym": {"type": "string", "minLength": 2},
+              "role": {"type": "string", "minLength": 2},
+              "expertise_area": {"type": "string", "minLength": 2},
+              "conflict_declared": {"type": "boolean"},
+              "conflict_notes": {"type": "string"}
+            }
+          },
+          "scores": {
+            "properties": {
+              "question_scope_fit": {"$ref": "#/$defs/finalScore"},
+              "source_provenance_access": {"$ref": "#/$defs/finalScore"},
+              "claim_passage_support": {"$ref": "#/$defs/finalScore"},
+              "study_design_interpretation": {"$ref": "#/$defs/finalScore"},
+              "outcome_denominator": {"$ref": "#/$defs/finalScore"},
+              "uncertainty_limitations": {"$ref": "#/$defs/finalScore"},
+              "counterevidence_heterogeneity": {"$ref": "#/$defs/finalScore"},
+              "conclusion_calibration": {"$ref": "#/$defs/finalScore"},
+              "usefulness_traceability": {"$ref": "#/$defs/finalScore"}
+            }
+          }
+        },
+        "required": ["score_rationales", "na_rationales"]
+      }
+    }
+  ],
+  "$defs": {
+    "score": {"type": ["integer", "string", "null"], "enum": [0, 1, 2, 3, "N/A", null]},
+    "finalScore": {"type": ["integer", "string"], "enum": [0, 1, 2, 3, "N/A"]},
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_id", "kind", "report_item_id", "source_id", "passage_id", "severity", "description", "reviewer_quote"],
+      "properties": {
+        "finding_id": {"type": "string", "minLength": 1, "maxLength": 100},
+        "kind": {"enum": ["wrong_source", "missing_passage", "unsupported_claim", "partial_support", "uncited_material_claim", "scope_mismatch", "omitted_counterevidence", "other"]},
+        "report_item_id": {"type": ["string", "null"], "maxLength": 200},
+        "source_id": {"type": ["string", "null"], "maxLength": 200},
+        "passage_id": {"type": ["string", "null"], "maxLength": 200},
+        "severity": {"enum": ["minor", "major", "critical", "not_applicable"]},
+        "description": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "reviewer_quote": {"type": ["string", "null"], "maxLength": 2000}
+      }
+    }
+  }
+}

@@ -1,0 +1,95 @@
+name: Veda local quality gates
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VEDA_TEST_POSTGRES_URL: postgresql+psycopg://veda:veda@127.0.0.1:5432/veda_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: veda_test
+          POSTGRES_USER: veda
+          POSTGRES_PASSWORD: veda
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U veda -d veda_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Scan repository text for committed secret patterns
+        run: python scripts/scan_secrets.py
+        working-directory: backend
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.6"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install backend and development dependencies
+        run: uv sync --locked --extra dev --no-build-isolation
+        working-directory: backend
+      - name: Validate research audit ledgers
+        run: uv run --locked python scripts/validate_research_audit.py
+        working-directory: backend
+      - name: Validate Render Blueprint schema and preview guards
+        run: uv run --locked python scripts/validate_render_blueprint.py
+        working-directory: backend
+      - name: Validate backup and restore runbook safety
+        run: uv run --locked python scripts/validate_backup_restore.py
+        working-directory: backend
+      - name: Verify PostgreSQL migration round-trip
+        run: uv run --locked python scripts/verify_postgres_roundtrip.py
+        working-directory: backend
+      - name: Run backend and PostgreSQL integration suite
+        run: uv run --locked python -m pytest -ra
+        working-directory: backend
+      - name: Check backend formatting and lint
+        run: |
+          uv run --locked python -m ruff format --check app tests scripts alembic/versions
+          uv run --locked python -m ruff check app tests scripts alembic/versions
+        working-directory: backend
+      - name: Audit backend dependencies
+        run: |
+          uv export --locked --extra dev --no-emit-project --format requirements-txt -o /tmp/veda-audit-requirements.txt
+          python -m pip install pip-audit
+          pip-audit -r /tmp/veda-audit-requirements.txt
+        working-directory: backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+      - name: Run frontend tests, browser acceptance, and production build
+        run: |
+          npm test -- --run
+          npm run build
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+        working-directory: frontend
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
+        working-directory: frontend

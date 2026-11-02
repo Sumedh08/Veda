@@ -1,0 +1,548 @@
+{
+  "schema_version": 1,
+  "registry_version": "veda-source-governance-2026-11-01-v4",
+  "updated_at": "2026-11-01",
+  "organizations": [
+    {
+      "canonical_id": "united-kingdom-government",
+      "category": "government",
+      "canonical_name": "United Kingdom Government",
+      "aliases": ["GOV.UK"],
+      "official_domains": ["gov.uk"],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.gov.uk/government/organisations",
+          "verified_at": "2026-11-01",
+          "note": "Official government organization directory and GOV.UK publication host."
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": ["GOV.UK Search API"]
+    },
+    {
+      "canonical_id": "world-bank-group",
+      "category": "multilateral",
+      "canonical_name": "World Bank Group",
+      "aliases": [
+        "World Bank",
+        "World Bank Data360"
+      ],
+      "official_domains": [
+        "worldbank.org",
+        "data360.worldbank.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.worldbank.org/en/about",
+          "verified_at": "2026-11-01"
+        },
+        {
+          "source_url": "https://api.crossref.org/prefixes/10.1596",
+          "verified_at": "2026-11-01",
+          "note": "Crossref public prefix record identifies the registrant as World Bank."
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "world_bank_data360",
+        "world_bank_documents_reports"
+      ],
+      "identifiers": {
+        "crossref_prefix": [
+          "10.1596"
+        ]
+      }
+    },
+    {
+      "canonical_id": "asian-development-bank",
+      "category": "multilateral",
+      "canonical_name": "Asian Development Bank",
+      "aliases": [
+        "ADB"
+      ],
+      "official_domains": [
+        "adb.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.adb.org/about/main",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "imf",
+      "category": "multilateral",
+      "canonical_name": "International Monetary Fund",
+      "aliases": [
+        "IMF"
+      ],
+      "official_domains": [
+        "imf.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.imf.org/en/About",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "oecd",
+      "category": "multilateral",
+      "canonical_name": "Organisation for Economic Co-operation and Development",
+      "aliases": [
+        "OECD"
+      ],
+      "official_domains": [
+        "oecd.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.oecd.org/about/",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "ilo",
+      "category": "multilateral",
+      "canonical_name": "International Labour Organization",
+      "aliases": [
+        "ILO",
+        "ILOSTAT"
+      ],
+      "official_domains": [
+        "ilo.org",
+        "ilostat.ilo.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.ilo.org/about-ilo",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "ilostat"
+      ]
+    },
+    {
+      "canonical_id": "united-nations",
+      "category": "multilateral",
+      "canonical_name": "United Nations",
+      "aliases": [
+        "UN"
+      ],
+      "official_domains": [
+        "un.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.un.org/en/about-us",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "who",
+      "category": "multilateral",
+      "canonical_name": "World Health Organization",
+      "aliases": [
+        "WHO"
+      ],
+      "official_domains": [
+        "who.int"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.who.int/about",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "wto",
+      "category": "multilateral",
+      "canonical_name": "World Trade Organization",
+      "aliases": [
+        "WTO"
+      ],
+      "official_domains": [
+        "wto.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.wto.org/english/thewto_e/whatis_e/whatis_e.htm",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "bis",
+      "category": "multilateral",
+      "canonical_name": "Bank for International Settlements",
+      "aliases": [
+        "BIS"
+      ],
+      "official_domains": [
+        "bis.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.bis.org/about/index.htm",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "mckinsey",
+      "category": "consulting",
+      "canonical_name": "McKinsey & Company",
+      "aliases": [
+        "McKinsey",
+        "McKinsey Global Institute",
+        "MGI"
+      ],
+      "official_domains": [
+        "mckinsey.com"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.mckinsey.com/mgi/about-us",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "bcg",
+      "category": "consulting",
+      "canonical_name": "Boston Consulting Group",
+      "aliases": [
+        "BCG",
+        "BCG Henderson Institute"
+      ],
+      "official_domains": [
+        "bcg.com"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.bcg.com/about/overview",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "bain",
+      "category": "consulting",
+      "canonical_name": "Bain & Company",
+      "aliases": [
+        "Bain"
+      ],
+      "official_domains": [
+        "bain.com"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.bain.com/about/",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "deloitte",
+      "category": "consulting",
+      "canonical_name": "Deloitte",
+      "aliases": [
+        "Deloitte Insights"
+      ],
+      "official_domains": [
+        "deloitte.com"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.deloitte.com/global/en/insights.html",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "pwc",
+      "category": "consulting",
+      "canonical_name": "PricewaterhouseCoopers",
+      "aliases": [
+        "PwC"
+      ],
+      "official_domains": [
+        "pwc.com"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.pwc.com/gx/en/about.html",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "ey",
+      "category": "consulting",
+      "canonical_name": "Ernst & Young",
+      "aliases": [
+        "EY"
+      ],
+      "official_domains": [
+        "ey.com"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.ey.com/en_gl/about-us",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "kpmg",
+      "category": "consulting",
+      "canonical_name": "KPMG",
+      "aliases": [],
+      "official_domains": [
+        "kpmg.com"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://kpmg.com/xx/en/home/about.html",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "brookings",
+      "category": "think_tank",
+      "canonical_name": "Brookings Institution",
+      "aliases": [
+        "Brookings"
+      ],
+      "official_domains": [
+        "brookings.edu"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.brookings.edu/about-us/",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "review_pending",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "rand",
+      "category": "think_tank",
+      "canonical_name": "RAND Corporation",
+      "aliases": [
+        "RAND"
+      ],
+      "official_domains": [
+        "rand.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.rand.org/about.html",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "review_pending",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "nber",
+      "category": "research_institute",
+      "canonical_name": "National Bureau of Economic Research",
+      "aliases": [
+        "NBER"
+      ],
+      "official_domains": [
+        "nber.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.nber.org/about-nber",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "review_pending",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "piie",
+      "category": "think_tank",
+      "canonical_name": "Peterson Institute for International Economics",
+      "aliases": [
+        "Peterson Institute",
+        "PIIE"
+      ],
+      "official_domains": [
+        "piie.com"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.piie.com/about-piie",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "review_pending",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "bruegel",
+      "category": "think_tank",
+      "canonical_name": "Bruegel",
+      "aliases": [],
+      "official_domains": [
+        "bruegel.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.bruegel.org/about-us",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "review_pending",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "chatham-house",
+      "category": "think_tank",
+      "canonical_name": "Chatham House",
+      "aliases": [
+        "Royal Institute of International Affairs"
+      ],
+      "official_domains": [
+        "chathamhouse.org"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.chathamhouse.org/about-us",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "review_pending",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    },
+    {
+      "canonical_id": "us-census-bureau",
+      "category": "official_statistics",
+      "canonical_name": "United States Census Bureau",
+      "aliases": [
+        "US Census Bureau",
+        "Census Bureau"
+      ],
+      "official_domains": [
+        "census.gov"
+      ],
+      "identity_status": "verified",
+      "identity_provenance": [
+        {
+          "source_url": "https://www.census.gov/about/history.html",
+          "verified_at": "2026-11-01"
+        }
+      ],
+      "quality_review_status": "not_assessed",
+      "discovery_adapters": [
+        "not_integrated"
+      ]
+    }
+  ],
+  "universities": [],
+  "journals": []
+}

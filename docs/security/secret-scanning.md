@@ -1,0 +1,14 @@
+# Local secret-pattern scanning
+
+`backend/scripts/scan_secrets.py` runs with the Python standard library. It walks the repository's source, configuration, lock, and documentation text files, skips known generated/vendor trees and binary files, and checks common OpenAI/OpenRouter, GitHub, AWS, Google, Slack, private-key-header, provider-prefixed API-key/access-token/secret assignments, and credentialed-database-URL patterns. It reads locally and does not upload source or findings. Environment files are scanned locally for risk detection but are ignored by Git; only `.env.example` may be published, and it must contain placeholders.
+
+The scanner prints only a repository-relative path, line number, and rule name. It never prints the matching value. CI runs it on each checked-out push and pull request before installing application dependencies. A text file larger than 4 MiB causes a nonzero “could not inspect” result rather than a clean-scan claim. On 2026-10-31, T-127 expanded named-setting detection to catch provider-prefixed variables such as `SARVAM_API_KEY`; a CLI regression verifies the assigned value is never printed. Before publishing, inspect the staged manifest and run a staged-content scan so ignored local `.env` findings are not confused with publishable source. A clean pattern scan is not proof that all secrets or sensitive data are absent.
+
+## False-positive policy
+
+- Keep test credentials synthetic and generated in test code when possible. Placeholder values containing explicit markers such as `fixture`, `test-only`, or `replace-with` are ignored by the scanner; this is intentionally narrow and does not exclude ordinary secret-looking values.
+- For an unavoidable published fixture on one line, use `# veda-secret-scan:ignore -- <specific reason>` on that same line. The reason must explain why the value is public/non-credential data. The exception cannot suppress another line or pattern elsewhere.
+- The current exceptions in `backend/tests/test_rate_limits.py` and `backend/tests/test_security.py` are deterministic local JWT-signing keys used only by isolated tests.
+- When a match is uncertain, inspect it locally; do not paste a candidate credential into a ticket, chat, or CI log. Remove actual secrets from files and rotate/revoke them at the issuer. Never add a broad path or rule suppression just to make the scan green.
+
+This is a local pattern scanner, not entropy analysis, provider revocation, binary-file inspection, a Git-history scan, or a hosted secret-management control. CI scans the checkout contents and does not scan prior Git history. Because this workspace has no Git metadata, history scanning and Actions execution are not available here. Production proxy trust and forwarded-header behavior also remain unverified until the actual host/proxy is configured; the local API deliberately ignores caller-supplied `X-Forwarded-For` when assigning rate-limit identity.

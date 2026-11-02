@@ -1,0 +1,40 @@
+# Full-text acquisition and parser contract screen
+
+**Checked:** 2026-10-31 against official public documentation.  
+**Scope:** OpenAlex content, Europe PMC/PMC structured access, GROBID, and Docling. No inference endpoints or private account APIs were called.
+
+## Findings and implementation consequences
+
+### OpenAlex content
+
+- OpenAlex exposes cached PDF and GROBID TEI XML for works with content. The work fields `has_content` and `content_urls` indicate availability; documented content routes are `https://content.openalex.org/works/{work_id}.pdf` and `.grobid-xml`. XML is served as gzip-encoded `application/xml`, normally transparently decompressed by HTTP clients. Availability can be searched with `has_content.pdf:true`; the API documentation also illustrates license filtering with `best_oa_location.license`. [Full-text documentation](https://help.openalex.org/access/fulltext/)
+- Content downloads are metered: the current price table is **$10 per 1,000 downloads**; a `HEAD` metadata request is free. The free API account includes $1/day, with documented examples equating that to 100 content downloads/day; fulltext downloads count against normal API usage. The full archive sync is a paid Member+/Partner add-on and is unnecessary for Veda's per-work resolver. [Example costs](https://help.openalex.org/access/example-costs/), [pricing](https://help.openalex.org/access/pricing/)
+- A free API key is not required for basic use, but increases the daily budget tenfold over keyless use; current documented per-second limits are 10 without a key and 30 for free-key/prepaid use. Responses expose per-call cost and remaining/reset headers. [Authentication and rate limits](https://help.openalex.org/api/authentication/)
+- **Policy consequence:** treat `has_content` as representation availability, not proof of permission to retain or display text. Resolve the exact work/version and inspect its rights/license metadata before acquisition and again before retention/display. OpenAlex metadata is CC0, but that does not change the rights attached to an underlying article.
+
+### Europe PMC and PMC
+
+- Europe PMC's official REST service provides scholarly search/metadata and full-text links; its documented full-text route is `GET /{PMCID}/fullTextXML` (for example, [`PMC3258128/fullTextXML`](https://www.ebi.ac.uk/europepmc/webservices/rest/PMC3258128/fullTextXML)). Treat absence/HTTP not-found as unavailable, not as grounds for scraping a publisher page. [REST service documentation](https://dev.europepmc.org/RestfulWebService)
+- PMC's supported machine-readable options include JATS XML through OAI-PMH (`metadataPrefix=pmc`; metadata-only `pmc_fm`) and BioC XML/JSON for the PMC Open Access Subset and Author Manuscript Collection. BioC records can be addressed by PMID or PMCID. [PMC OAI-PMH](https://pmc.ncbi.nlm.nih.gov/tools/oai/), [PMC BioC API](https://www.ncbi.nlm.nih.gov/research/bionlp/APIs/BioC-PMC/)
+- PMC explicitly limits automated content retrieval to PMC Cloud, OAI-PMH, E-Utilities, and BioC; systematic/bulk retrieval through other automated routes is prohibited. Not all PMC records permit text mining/reuse; inspect each article's license. OAI-PMH is limited to **3 requests/second**, requires no concurrent requests, and asks scripts exceeding 100 requests to run off peak. [PMC developer rules](https://pmc.ncbi.nlm.nih.gov/tools/developers/), [OAI-PMH limits and rights](https://pmc.ncbi.nlm.nih.gov/tools/oai/)
+- **Breaking change:** PMC's former OA Web Service was retired on 2026-08-25. Do not implement or retain it as a fallback; use current documented services such as OAI-PMH or BioC. [PMC OA Web Service retirement notice](https://pmc.ncbi.nlm.nih.gov/tools/oa-service/)
+- No Europe PMC REST/BioC request-rate figure was found in the reviewed official API pages. Treat exact limits and any bulk terms not stated there as unresolved; use bounded serial requests, identify the client where applicable, and honor service responses rather than assuming unlimited throughput. PMC OAI-PMH's explicit limits remain applicable to that service.
+
+### GROBID
+
+- GROBID 0.9.1 is the current release shown by its official release page. Its REST web service is the recommended integration mode; upstream recommends a multi-core service for production/benchmarking and identifies Docker as the standard deployment path. [Releases](https://github.com/grobidOrg/grobid/releases), [service API](https://github.com/grobidOrg/grobid/blob/master/doc/Grobid-service.md)
+- The pinned `0.9.1-full` image is about **8 GB**, includes deep-learning models and libraries, and offers better accuracy but higher resource needs; `0.9.1-crf` is about **500 MB**, CPU-oriented and lighter, with some accuracy trade-offs. Upstream's Docker guidance suggests about **4 GB RAM** for whole-document full-text processing, 2 GB for header-only, 3 GB for citations, and 6–8 GB for heavier parallel batches. The server concurrency default is 10 and should be configured to fit available CPU/GPU capacity. GPU container acceleration is documented for Linux; Windows/Mac use CPU for this image. [Docker deployment/resource guidance](https://github.com/grobidOrg/grobid/blob/master/doc/Grobid-docker.md), [service concurrency](https://github.com/grobidOrg/grobid/blob/master/doc/Grobid-service.md)
+- GROBID code is Apache-2.0; upstream lists its documentation as CC0 and annotated data as CC-BY. The reviewed pages do not give a complete independent license inventory for every bundled runtime/model artifact, so verify transitive and model-resource notices before redistribution. [Repository license and notices](https://github.com/grobidOrg/grobid), [license file](https://github.com/grobidOrg/grobid/blob/master/LICENSE)
+- **Implementation consequence:** retain GROBID as an optional, version-pinned PDF service adapter with health checks, byte/time limits, configurable low concurrency, and honest parser provenance. Keep structured XML paths independent of Docker/GROBID availability.
+
+### Docling
+
+- The Python project is MIT-licensed and supports Windows, but its PDF pipeline depends on PyTorch and downloaded model artifacts; OCR engines are optional extras with their own dependencies. The official FAQ says PDF model weights come from a separate model repository. That repository advertises CDLA-Permissive-2.0 and Apache-2.0; verify artifact-specific terms and transitive OCR/model licenses before packaging or deployment. [Docling repository](https://github.com/docling-project/docling), [installation](https://docling-project.github.io/docling/getting_started/installation/), [model-artifact requirement](https://docling-project.github.io/docling/faq/), [model repository and license labels](https://huggingface.co/docling-project/docling-models)
+- **Decision:** keep Docling deferred. Current official docs imply an additional ML runtime, model cache, and optional OCR dependencies; no Veda fixture has yet demonstrated a table/layout/scanned-PDF failure that GROBID cannot handle. Reconsider only after a representative, rights-cleared fixture shows measurable extraction improvement that justifies the footprint and separate model-license review.
+
+## Unresolved points
+
+- OpenAlex documents content availability and API metering, but the inspected pages do not establish reuse rights for every cached file; rights must remain per-work/per-version and retention-specific.
+- Europe PMC's current public REST documentation is accessible but intermittently timed out during this review. The route and general service contract were visible through the official service page/API route; its exact rate policy and behavior for records outside the OA full-text subset need a targeted contract test before adapter release.
+- Docling model repository labels show two licenses but do not map each installed model artifact to a license in the inspected overview; do not redistribute its artifacts until that mapping is checked.
+- No source file or live document was ingested in this research screen. The note verifies public contracts only; it does not establish Veda's implementation or a successful extraction.

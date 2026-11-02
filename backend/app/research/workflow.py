@@ -6925,6 +6925,9 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
         govuk_content_retrieved = 0
         govuk_content_failures = 0
         govuk_content_passage_count = 0
+        official_catalog_page_verification_attempts = 0
+        official_catalog_page_verification_failures = 0
+        official_catalog_page_metadata_requests = 0
         openaire_repository_lookup_used = False
         openaire_repository_lookup_attempts = 0
         openaire_repository_lookup_failures = 0
@@ -7619,6 +7622,274 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                 if isinstance(source.metadata_json.get("retrieval"), dict)
                 else {}
             )
+            if provider_name == "Official site WordPress search":
+                extensions = (
+                    provider_metadata.get("extensions", {})
+                    if isinstance(provider_metadata, dict)
+                    else {}
+                )
+                extensions = dict(extensions) if isinstance(extensions, dict) else {}
+                organization_evidence = extensions.get("organization_discovery")
+                catalog_evidence = extensions.get("official_site_discovery")
+                organization_evidence = (
+                    dict(organization_evidence) if isinstance(organization_evidence, dict) else {}
+                )
+                catalog_evidence = (
+                    dict(catalog_evidence) if isinstance(catalog_evidence, dict) else {}
+                )
+                identity_status = organization_evidence.get(
+                    "identity_status", catalog_evidence.get("identity_status")
+                )
+                organization_id = organization_evidence.get(
+                    "organization_id", catalog_evidence.get("organization_id")
+                )
+                official_domain = catalog_evidence.get("official_domain")
+                verification_record = retrieval_meta.get("official_page_verification")
+                page_search_evidence = extensions.get("official_site_publication_search")
+                page_search_evidence = (
+                    dict(page_search_evidence) if isinstance(page_search_evidence, dict) else {}
+                )
+                cached_page_is_verified = bool(
+                    organization_evidence.get("publisher_verification")
+                    == "official_page_metadata_verified"
+                    and organization_evidence.get("official_publication_url") == source.url
+                    and page_search_evidence.get("page_metadata_verification")
+                    in {
+                        "robots_allowed_title_and_canonical_match",
+                        "robots_unavailable_4xx_title_and_canonical_match",
+                    }
+                )
+                if cached_page_is_verified:
+                    provider_name = "Official publication page metadata"
+                    verification_record = verification_record or {
+                        "status": "reused_verified_metadata",
+                        "canonical_url": source.url,
+                        "request_count": 0,
+                    }
+                else:
+                    if (
+                        identity_status
+                        not in {"VERIFIED_ESTABLISHED", "VERIFIED_DOMAIN_SPECIALIST"}
+                        or not isinstance(organization_id, str)
+                        or not organization_id.strip()
+                        or not isinstance(official_domain, str)
+                        or not official_domain.strip()
+                    ):
+                        verification_record = {
+                            "status": "not_attempted",
+                            "reason_code": "verified_organization_domain_missing",
+                            "request_count": 0,
+                            "observed_at": utcnow().isoformat(),
+                        }
+                    elif official_catalog_page_verification_attempts >= profile.max_html_pages:
+                        verification_record = {
+                            "status": "not_attempted",
+                            "reason_code": "official_page_verification_budget_exhausted",
+                            "request_count": 0,
+                            "observed_at": utcnow().isoformat(),
+                        }
+                    elif _stage_time_expired(job_snapshot):
+                        time_limit_reached = True
+                        verification_record = {
+                            "status": "not_attempted",
+                            "reason_code": "depth_time_limit",
+                            "request_count": 0,
+                            "observed_at": utcnow().isoformat(),
+                        }
+                    else:
+                        official_catalog_page_verification_attempts += 1
+                        verification_requests = {"count": 0}
+
+                        def admit_catalog_page_request(
+                            origin: str,
+                            request_counter: dict[str, int] = verification_requests,
+                        ) -> None:
+                            try:
+                                origin_limiter.acquire(
+                                    origin,
+                                    2.0,
+                                    deadline=time.monotonic()
+                                    + min(4.0, _stage_time_remaining(job_snapshot)),
+                                )
+                                request_counter["count"] += 1
+                            except OriginRequestDeferred as exc:
+                                raise OfficialSitePublicationSearchError(
+                                    "origin_request_deferred",
+                                    requests_attempted=request_counter["count"],
+                                ) from exc
+                            except OriginRateLimitUnavailable:
+                                raise OfficialSitePublicationSearchError(
+                                    "origin_limiter_unavailable",
+                                    requests_attempted=request_counter["count"],
+                                ) from None
+
+                        verification_provider = None
+                        try:
+                            verification_provider = WordPressPublicationSearchProvider(
+                                before_request=admit_catalog_page_request
+                            )
+                            official_domains = catalog_evidence.get("official_domains")
+                            if not isinstance(official_domains, list):
+                                official_domains = [official_domain]
+                            homepage_url = catalog_evidence.get("homepage_url")
+                            organization_for_verification = {
+                                **catalog_evidence,
+                                **organization_evidence,
+                                "organization_id": organization_id,
+                                "identity_status": identity_status,
+                                "official_domain": official_domain,
+                                "official_domains": official_domains,
+                                "official_urls": (
+                                    [homepage_url] if isinstance(homepage_url, str) else []
+                                ),
+                            }
+                            page_metadata = verification_provider.verify_publication_page(
+                                organization_for_verification,
+                                source.url,
+                                expected_title=source.title,
+                            )
+                            official_catalog_page_metadata_requests += max(
+                                page_metadata.request_count,
+                                verification_requests["count"],
+                            )
+                            page_metadata_verification = (
+                                "robots_allowed_title_and_canonical_match"
+                                if page_metadata.robots_status == "rules_checked"
+                                else "robots_unavailable_4xx_title_and_canonical_match"
+                            )
+                            page_license = {
+                                "license_code": page_metadata.license_code,
+                                "license_url": page_metadata.license_url,
+                                "license_evidence": page_metadata.license_evidence,
+                                "license_status": page_metadata.license_status,
+                                "observed_at": page_metadata.retrieved_at,
+                            }
+                            site_terms = {
+                                "site_terms_status": page_metadata.site_terms_status,
+                                "site_terms_url": page_metadata.site_terms_url,
+                                "site_terms_sha256": page_metadata.site_terms_sha256,
+                                "site_terms_restriction_codes": list(
+                                    page_metadata.site_terms_restriction_codes
+                                ),
+                            }
+                            organization_evidence.update(
+                                {
+                                    "organization_id": organization_id,
+                                    "organization_name": organization_evidence.get(
+                                        "organization_name",
+                                        catalog_evidence.get("organization_name"),
+                                    ),
+                                    "identity_status": identity_status,
+                                    "official_domain": official_domain,
+                                    "official_domains": official_domains,
+                                    "official_publication_url": page_metadata.canonical_url,
+                                    "publisher_verification": "official_page_metadata_verified",
+                                    "publication_identity": (
+                                        "official-page:"
+                                        + hashlib.sha256(
+                                            page_metadata.canonical_url.casefold().encode("utf-8")
+                                        ).hexdigest()
+                                    ),
+                                    "official_page_license": page_license,
+                                    "official_page_access": {
+                                        "robots_status": page_metadata.robots_status,
+                                        "robots_http_status": page_metadata.robots_http_status,
+                                        "linked_pdf_url": page_metadata.linked_pdf_url,
+                                        "item_specific_restriction_codes": list(
+                                            page_metadata.item_specific_restriction_codes
+                                        ),
+                                        "copyright_notice_detected": page_metadata.copyright_notice_detected,
+                                        "site_terms": site_terms,
+                                    },
+                                }
+                            )
+                            page_search_evidence.update(
+                                {
+                                    "page_metadata_verification": page_metadata_verification,
+                                    "metadata_kind": page_metadata.metadata_kind,
+                                    "license_code": page_metadata.license_code,
+                                    "license_url": page_metadata.license_url,
+                                    "license_evidence": page_metadata.license_evidence,
+                                    "license_status": page_metadata.license_status,
+                                    "page_metadata_title": page_metadata.title,
+                                    "page_metadata_canonical_url": page_metadata.canonical_url,
+                                    "page_metadata_retrieved_at": page_metadata.retrieved_at,
+                                    "page_metadata_request_count": page_metadata.request_count,
+                                    "page_metadata_license": page_license,
+                                    "robots_status": page_metadata.robots_status,
+                                    "robots_http_status": page_metadata.robots_http_status,
+                                    "linked_pdf_url": page_metadata.linked_pdf_url,
+                                    "item_specific_restriction_codes": list(
+                                        page_metadata.item_specific_restriction_codes
+                                    ),
+                                    "copyright_notice_detected": page_metadata.copyright_notice_detected,
+                                    "site_terms": site_terms,
+                                    "content_fetched": False,
+                                    "rights_status": "page_identity_verified_rights_pending",
+                                }
+                            )
+                            extensions["organization_discovery"] = organization_evidence
+                            extensions["official_site_publication_search"] = page_search_evidence
+                            provider_metadata = dict(provider_metadata)
+                            provider_metadata["extensions"] = extensions
+                            source_metadata = dict(source.metadata_json or {})
+                            source_metadata["provider_metadata"] = provider_metadata
+                            source.metadata_json = source_metadata
+                            source.title = page_metadata.title
+                            source.url = page_metadata.canonical_url
+                            verification_record = {
+                                "status": "verified",
+                                "verification_method": "verified_identity_official_domain_page_metadata_title_canonical_robots_and_terms",
+                                "requested_url": page_metadata.requested_url,
+                                "canonical_url": page_metadata.canonical_url,
+                                "page_title": page_metadata.title,
+                                "metadata_kind": page_metadata.metadata_kind,
+                                "robots_status": page_metadata.robots_status,
+                                "site_terms_status": page_metadata.site_terms_status,
+                                "request_count": page_metadata.request_count,
+                                "observed_at": page_metadata.retrieved_at,
+                            }
+                            provider_name = "Official publication page metadata"
+                        except OfficialSitePublicationSearchError as exc:
+                            official_catalog_page_verification_failures += 1
+                            request_count = max(
+                                exc.requests_attempted,
+                                verification_requests["count"],
+                            )
+                            official_catalog_page_metadata_requests += request_count
+                            verification_record = {
+                                "status": "not_verified",
+                                "reason_code": exc.code,
+                                "request_count": request_count,
+                                "observed_at": utcnow().isoformat(),
+                            }
+                            if exc.code in {
+                                "origin_request_deferred",
+                                "origin_limiter_unavailable",
+                            }:
+                                html_deferred += 1
+                        except Exception as exc:
+                            official_catalog_page_verification_failures += 1
+                            official_catalog_page_metadata_requests += verification_requests[
+                                "count"
+                            ]
+                            verification_record = {
+                                "status": "not_verified",
+                                "reason_code": "provider_query_failed",
+                                "error_class": _safe_exception_class(exc),
+                                "request_count": verification_requests["count"],
+                                "observed_at": utcnow().isoformat(),
+                            }
+                        finally:
+                            if verification_provider is not None:
+                                verification_provider.close()
+                if verification_record is not None:
+                    retrieval_meta["official_page_verification"] = verification_record
+                if provider_name == "Official site WordPress search":
+                    source_metadata = dict(source.metadata_json or {})
+                    source_metadata["retrieval"] = retrieval_meta
+                    source.metadata_json = source_metadata
+                    continue
             if provider_name == "Crossref":
                 extensions = (
                     provider_metadata.get("extensions", {})
@@ -9522,6 +9793,15 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                 "govuk_content_retrieved": govuk_content_retrieved,
                 "govuk_content_failures": govuk_content_failures,
                 "govuk_content_passages": govuk_content_passage_count,
+                "official_catalog_page_verification_attempts": (
+                    official_catalog_page_verification_attempts
+                ),
+                "official_catalog_page_verification_failures": (
+                    official_catalog_page_verification_failures
+                ),
+                "official_catalog_page_metadata_requests": (
+                    official_catalog_page_metadata_requests
+                ),
                 "openaire_repository_lookup_attempts": openaire_repository_lookup_attempts,
                 "openaire_repository_lookup_failures": openaire_repository_lookup_failures,
                 "openaire_repository_lookup_deferred": openaire_repository_lookup_deferred,

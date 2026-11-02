@@ -4822,6 +4822,204 @@ def test_doi_less_official_page_persists_passages_under_its_rights_profile(
     assert any(claim["source_id"] == source["id"] for claim in claims)
 
 
+@pytest.mark.parametrize("page_access_denied", [False, True])
+def test_official_catalog_report_acquisition_outcome_is_persisted(
+    client, monkeypatch, page_access_denied
+):
+    from datetime import UTC, datetime
+    from hashlib import sha256
+
+    from app.research.safe_fetch import SafeHTMLDocument
+
+    page_url = "https://specialist.example/research/urban-heat"
+    page_title = "Urban heat vulnerability assessment across Indian cities"
+    page_text = (
+        "The assessment compared heat exposure across three metropolitan regions.\n\n"
+        "Methods combined satellite-derived land-surface temperature with census indicators.\n\n"
+        "Results show that exposure and adaptive capacity vary substantially between neighborhoods."
+    )
+    verification_calls = []
+    fetched = []
+
+    class ImmediateOriginLimiter:
+        def __init__(self, _db):
+            pass
+
+        def acquire(self, origin, interval, *, deadline):
+            assert origin == "https://specialist.example"
+            assert interval == 2.0
+            assert deadline > 0
+
+    class FixtureOfficialSiteVerifier:
+        def __init__(self, *, before_request=None):
+            self.before_request = before_request
+
+        def verify_publication_page(self, organization, publication_url, *, expected_title):
+            verification_calls.append((organization, publication_url, expected_title))
+            assert organization["identity_status"] == "VERIFIED_DOMAIN_SPECIALIST"
+            assert organization["official_domain"] == "specialist.example"
+            assert publication_url == page_url
+            assert expected_title == page_title
+            assert self.before_request is not None
+            self.before_request("https://specialist.example")
+            if page_access_denied:
+                raise workflow.OfficialSitePublicationSearchError(
+                    "access_denied", request_dispatched=True, requests_attempted=1
+                )
+            return SimpleNamespace(
+                requested_url=page_url,
+                canonical_url=page_url,
+                title=page_title,
+                publication_date="2025-06-01",
+                metadata_kind="citation_metadata",
+                retrieved_at="2026-11-02T10:00:00+00:00",
+                request_count=3,
+                license_code=None,
+                license_url=None,
+                license_evidence=None,
+                license_status="not_declared",
+                robots_status="rules_checked",
+                robots_http_status=200,
+                site_terms_status="checked_no_restriction_signal",
+                site_terms_url="https://specialist.example/terms",
+                site_terms_sha256="a" * 64,
+                site_terms_restriction_codes=(),
+                linked_pdf_url=None,
+                item_specific_restriction_codes=(),
+                copyright_notice_detected=True,
+            )
+
+        def close(self):
+            pass
+
+    class FixtureHTMLFetcher:
+        document_byte_limit = 2_000_000
+
+        def __init__(self, **_kwargs):
+            self.timeout_seconds = 8
+
+        def fetch_html(self, url, *, license_name, rights_decision=None):
+            fetched.append((url, license_name, rights_decision))
+            return SafeHTMLDocument(
+                text=page_text,
+                sha256=sha256(page_text.encode()).hexdigest(),
+                media_type="text/html",
+                final_host="specialist.example",
+                retrieved_at=datetime.now(UTC),
+                truncated=False,
+                host_policy_id=rights_decision.policy_version if rights_decision else "",
+                host_terms_url=rights_decision.terms_url if rights_decision else "",
+                robots_status="rules_checked",
+            )
+
+    monkeypatch.setattr(workflow, "DatabaseOriginRequestLimiter", ImmediateOriginLimiter)
+    monkeypatch.setattr(workflow, "WordPressPublicationSearchProvider", FixtureOfficialSiteVerifier)
+    monkeypatch.setattr(workflow, "SafeHTMLFetcher", FixtureHTMLFetcher)
+    monkeypatch.setattr(workflow.settings, "rights_jurisdiction", "IN")
+
+    project = create_project(client)
+    job = create_job(
+        client,
+        project["id"],
+        idempotency_key="official-catalog-report-private-evidence-01",
+        question="How do heat hazards and social vulnerability vary across Indian cities?",
+    )
+    planned = client.post(
+        f"/api/v1/research-jobs/{job['id']}/advance",
+        json={"operation_key": "official-catalog-report-plan-01"},
+    )
+    assert planned.status_code == 200, planned.text
+    with client.db_sessions() as db:
+        research_job = db.get(ResearchJob, job["id"])
+        assert research_job is not None
+        research_job.current_stage = "extraction"
+        db.add(
+            Source(
+                job_id=job["id"],
+                external_id="official-site:specialist.example:381",
+                title=page_title,
+                doi=None,
+                url=page_url,
+                publisher="Independent Urban Climate Institute",
+                source_type="institutional_report",
+                retrieval_status="metadata_only",
+                metadata_json={
+                    "provider": "Official site WordPress search",
+                    "provider_metadata": workflow.versioned_provider_metadata(
+                        "Official site WordPress search",
+                        {
+                            "official_site_discovery": {
+                                "organization_id": "orgid:independently-verified-example",
+                                "organization_name": "Independent Urban Climate Institute",
+                                "identity_status": "VERIFIED_DOMAIN_SPECIALIST",
+                                "verification_source": "https://registry.example/organizations/381",
+                                "official_domain": "specialist.example",
+                                "homepage_url": "https://specialist.example/",
+                                "api_url": "https://specialist.example/wp-json/wp/v2/search",
+                                "wordpress_record_id": 381,
+                                "publisher_verification": "official_domain_linked_from_verified_identity",
+                            },
+                            "organization_discovery": {
+                                "organization_id": "orgid:independently-verified-example",
+                                "organization_name": "Independent Urban Climate Institute",
+                                "identity_status": "VERIFIED_DOMAIN_SPECIALIST",
+                                "verification_method": "official_domain_corroborated_identity",
+                                "verification_source": "https://registry.example/organizations/381",
+                            },
+                        },
+                    ),
+                },
+            )
+        )
+        db.commit()
+
+    extracted = client.post(
+        f"/api/v1/research-jobs/{job['id']}/advance",
+        json={"operation_key": "official-catalog-report-extract-01"},
+    )
+    assert extracted.status_code == 200, extracted.text
+    assert len(verification_calls) == 1
+    extraction_event = next(
+        event
+        for event in client.get(f"/api/v1/research-jobs/{job['id']}/events").json()["items"]
+        if event["stage"] == "extraction" and event["event_type"] == "step_completed"
+    )
+    assert extraction_event["data"]["official_catalog_page_metadata_requests"] == (
+        1 if page_access_denied else 3
+    )
+    source = client.get(f"/api/v1/research-jobs/{job['id']}/sources").json()["items"][0]
+    inspected = client.get(f"/api/v1/sources/{source['id']}").json()
+    assert source["provider"] == "Official site WordPress search"
+    if page_access_denied:
+        assert fetched == []
+        assert source["retrieval_status"] == "metadata_only"
+        assert source["retrieval"]["official_page_verification"]["status"] == "not_verified"
+        assert source["retrieval"]["official_page_verification"]["reason_code"] == "access_denied"
+        assert inspected["passages"] == []
+        return
+
+    assert len(fetched) == 1
+    assert source["retrieval_status"] == "full_text_html"
+    assert source["retrieval"]["scope"] == "official_page_private_research_verified_publication"
+    assert source["retrieval"]["rights_decision"] == "PERMITTED_WITH_LIMITATIONS"
+    assert source["retrieval"]["official_page_verification"]["status"] == "verified"
+    assert len(inspected["passages"]) <= 4
+    assert sum(len(item["content"]) for item in inspected["passages"]) <= 1200
+    assert any(
+        "satellite-derived land-surface temperature" in item["content"]
+        for item in inspected["passages"]
+    )
+    claims = client.get(f"/api/v1/research-jobs/{job['id']}/claims").json()["items"]
+    assert any(item["source_id"] == source["id"] for item in claims)
+    final = run_all_steps(client, job["id"])
+    assert final["status"] == "completed_with_limitations"
+    report = client.get(f"/api/v1/research-jobs/{job['id']}/report").json()
+    assert any(
+        citation["source_id"] == source["id"] and citation["passages"]
+        for citation in report["citation_map"].values()
+    )
+
+
 def test_private_research_passages_remain_inspectable_but_are_withheld_from_exports(client):
     project = create_project(client)
     job = create_job(

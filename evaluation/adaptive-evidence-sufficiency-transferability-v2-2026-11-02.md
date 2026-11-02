@@ -1,7 +1,8 @@
 # Adaptive evidence sufficiency transferability set v2
 
-**Frozen before the follow-up implementation:** 2026-11-02  
-**Baseline commit:** `25b9b90d3ebfeaa4e4077ec4ca1242466be1f7c3`  
+**Frozen before the follow-up implementation:** 2026-11-02
+
+**Baseline commit:** `25b9b90d3ebfeaa4e4077ec4ca1242466be1f7c3`
 **Protocol:** `adaptive-sufficiency-transferability-v2`
 
 The prior H1–H3 cases in `adaptive-evidence-sufficiency-holdouts-2026-11-02.md` were inspected during implementation and one wording feature informed a generic question classifier. They are reclassified as diagnostic; no untouched holdout result is claimed for them. This successor set is frozen before the follow-up changes to DOI-less work-version grouping and requirement-level independence accounting. The cases must not be added to production logic or used to select expected publications.

@@ -748,11 +748,36 @@ async function installApiFixtures(
         openalex_fulltext_availability: options.openAlexContentAvailability,
       }
     : sourceWithPublicationProvenance;
-  const activeSource = options.privateResearchRights
+  const activeSourceBaseWithDocumentAnalysis = options.fullTextEvidence
     ? {
         ...sourceWithAvailability,
+        appraisal: {
+          ...sourceWithAvailability.appraisal,
+          extensions: {
+            document_analysis: {
+              schema_version: 1,
+              status: 'model_assessed_not_independently_verified',
+              scope: 'persisted_passages_only',
+              question_fit: 'partial',
+              fit_passage_ids: [sourceWithAvailability.passages[0].id],
+              study_focus: 'A bounded workplace productivity study.',
+              study_focus_passage_ids: [sourceWithAvailability.passages[0].id],
+              findings: [{ statement: 'The report describes a measured productivity association.', passage_ids: [sourceWithAvailability.passages[0].id] }],
+              limitations: [{ statement: 'The observed association does not by itself establish causality.', passage_ids: [sourceWithAvailability.passages[0].id] }],
+              cannot_conclude: [],
+              further_information_needed: ['Independent studies in other populations.'],
+              provider: 'fixture-provider',
+              model: 'fixture-model',
+            },
+          },
+        },
+      }
+    : sourceWithAvailability;
+  const activeSource = options.privateResearchRights
+    ? {
+        ...activeSourceBaseWithDocumentAnalysis,
         retrieval: {
-          ...sourceWithAvailability.retrieval,
+          ...activeSourceBaseWithDocumentAnalysis.retrieval,
           rights_assessment: {
             discovery: 'PERMITTED_METADATA',
             access: 'PERMITTED',
@@ -773,7 +798,7 @@ async function installApiFixtures(
           },
         },
       }
-    : sourceWithAvailability;
+    : activeSourceBaseWithDocumentAnalysis;
   const projectListRequestCounter = { count: 0 };
   let currentProject = project;
   let retentionDays: 30 | 90 | 365 | null = null;
@@ -1224,6 +1249,21 @@ test('report citations open their source inspector by mouse and keyboard', async
   await expect(inspector.locator('#source-passage-passage-browser-fixture')).toContainText('Abstract text withheld');
   await inspector.getByRole('button', { name: 'Close source inspector' }).click();
   await expect(inspector).toHaveCount(0);
+});
+
+test('source inspector presents passage-linked document analysis as provisional', async ({ page }) => {
+  await openReport(page, { fullTextEvidence: true });
+  await page.getByRole('button', { name: 'Open source S1' }).click();
+  const inspector = page.getByRole('dialog', { name: source.title });
+  await expect(inspector.getByRole('heading', { name: 'Document analysis' })).toBeVisible();
+  await expect(inspector).toContainText('stored passages only; it is not independently verified');
+  await expect(inspector.getByText('A bounded workplace productivity study.', { exact: true })).toBeVisible();
+  await expect(inspector.getByText('The report describes a measured productivity association.', { exact: true })).toBeVisible();
+  await expect(inspector.getByText('These are research-gap suggestions, not source findings.')).toBeVisible();
+  const linkedPassage = inspector.getByRole('link', { name: 'Results · paragraph 1 sentence 1' }).first();
+  await expect(linkedPassage).toHaveAttribute('href', '#source-passage-passage-browser-fixture');
+  await linkedPassage.click();
+  await expect(inspector.locator('#source-passage-passage-browser-fixture')).toContainText(sourceSentence);
 });
 
 test('source inspector preserves Crossref identity evidence without labeling it ROR', async ({ page }) => {

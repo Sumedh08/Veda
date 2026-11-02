@@ -676,11 +676,12 @@ def _candidate_out(candidate: DiscoveryCandidate) -> dict[str, Any]:
 
 
 def _structured_document_metadata_out(value: object) -> dict[str, Any] | None:
-    """Expose an allowlisted extraction provenance summary, never raw document XML."""
-    if not isinstance(value, dict) or value.get("representation_format") != "jats":
+    """Expose allowlisted parser/section provenance for structured and PDF versions."""
+    if not isinstance(value, dict):
         return None
     output: dict[str, Any] = {}
     for key, max_length in (
+        ("representation_format", 16),
         ("retrieval_origin", 80),
         ("pmcid", 20),
         ("doi", 300),
@@ -689,14 +690,22 @@ def _structured_document_metadata_out(value: object) -> dict[str, Any] | None:
         ("license", 40),
         ("raw_license", 100),
         ("license_evidence", 120),
-        ("representation_format", 16),
         ("parser_name", 80),
         ("parser_version", 40),
         ("extraction_status", 40),
+        ("structured_content_sha256", 64),
     ):
         item = value.get(key)
         if isinstance(item, str):
             output[key] = item[:max_length]
+    for key in ("page_count", "pages_extracted", "sections_count", "passages_count"):
+        item = value.get(key)
+        if isinstance(item, int) and not isinstance(item, bool) and item >= 0:
+            output[key] = item
+    for key in ("methods_results_usable", "section_metadata_truncated"):
+        item = value.get(key)
+        if isinstance(item, bool):
+            output[key] = item
     sections = value.get("sections")
     if isinstance(sections, list):
         safe_sections = []
@@ -723,9 +732,7 @@ def _structured_document_metadata_out(value: object) -> dict[str, Any] | None:
     warnings = value.get("extraction_warnings")
     if isinstance(warnings, list):
         output["extraction_warnings"] = [str(item)[:80] for item in warnings[:32]]
-    if isinstance(value.get("section_metadata_truncated"), bool):
-        output["section_metadata_truncated"] = value["section_metadata_truncated"]
-    return output
+    return output or None
 
 
 def _passage_out(passage: Passage) -> dict[str, Any]:
@@ -750,6 +757,7 @@ def _passage_out(passage: Passage) -> dict[str, Any]:
         "document": (
             {
                 "id": document.id,
+                "source_id": document.source_id,
                 "schema_version": document.schema_version,
                 "source_version": document.source_version,
                 "document_sha256": document.document_sha256,
@@ -3154,6 +3162,7 @@ def get_source_provenance(
         Passage.id,
         Passage.document_id,
         Passage.locator,
+        Passage.content,
         Passage.content_hash,
         Passage.access_level,
         Passage.truncated,
@@ -3169,11 +3178,72 @@ def get_source_provenance(
     passage_count = (
         db.scalar(select(func.count(Passage.id)).where(Passage.source_id == source.id)) or 0
     )
+    document_rows = list(
+        db.execute(
+            select(
+                RetrievedDocument.id,
+                RetrievedDocument.source_version,
+                RetrievedDocument.document_sha256,
+                RetrievedDocument.retrieved_at,
+                RetrievedDocument.locator,
+                RetrievedDocument.media_type,
+                RetrievedDocument.access_class,
+                RetrievedDocument.hash_scope,
+                RetrievedDocument.metadata_json,
+            )
+            .where(RetrievedDocument.source_id == source.id)
+            .order_by(RetrievedDocument.retrieved_at, RetrievedDocument.id)
+            .limit(11)
+        ).mappings()
+    )
+    document_count = (
+        db.scalar(
+            select(func.count(RetrievedDocument.id)).where(RetrievedDocument.source_id == source.id)
+        )
+        or 0
+    )
     return {
         "source": _source_out(source),
-        "passages": [dict(passage) for passage in passages[:50]],
+        "passages": [
+            {
+                key: passage[key]
+                for key in (
+                    "id",
+                    "document_id",
+                    "locator",
+                    "content_hash",
+                    "access_level",
+                    "truncated",
+                )
+            }
+            | {
+                "content_hash_verified": (
+                    isinstance(passage["content"], str)
+                    and isinstance(passage["content_hash"], str)
+                    and sha256(passage["content"].encode("utf-8")).hexdigest()
+                    == passage["content_hash"]
+                )
+            }
+            for passage in passages[:50]
+        ],
         "total_passages": passage_count,
         "has_more": passage_count > 50,
+        "documents": [
+            {
+                "id": item["id"],
+                "source_version": item["source_version"],
+                "document_sha256": item["document_sha256"],
+                "retrieved_at": item["retrieved_at"],
+                "locator": item["locator"],
+                "media_type": item["media_type"],
+                "access_class": item["access_class"],
+                "hash_scope": item["hash_scope"],
+                "metadata": _structured_document_metadata_out(item["metadata_json"]),
+            }
+            for item in document_rows[:10]
+        ],
+        "total_documents": int(document_count),
+        "documents_has_more": document_count > 10,
     }
 
 

@@ -12,7 +12,7 @@ import * as apiClient from './api';
 import { API_BASE, api, setTokenProvider, setUnauthorizedHandler } from './api';
 import { linkifyCitationMarkers } from './citations';
 import { latestModelExecutionPlan, type ModelExecutionPlan } from './executionPlan';
-import type { Claim, ClaimEvidence, Conversation, ConversationMessage, DataLifecycle, DepthProfile, DiscoveryCandidate, EvidenceLink, EvidenceRelationship, CompetingHypothesis, FollowUpContext, JobEvent, Passage, Project, ReportHistoryItem, ReportInspection, ResearchJob, ResearchPlan, ResearchReport, Source, StatisticsRouteOutcome, UserPreferences } from './types';
+import type { Claim, ClaimEvidence, Conversation, ConversationMessage, DataLifecycle, DepthProfile, DiscoveryCandidate, DocumentAnalysisPoint, EvidenceLink, EvidenceRelationship, CompetingHypothesis, FollowUpContext, JobEvent, Passage, Project, ReportHistoryItem, ReportInspection, ResearchJob, ResearchPlan, ResearchReport, Source, SourceDocumentAnalysis, StatisticsRouteOutcome, UserPreferences } from './types';
 
 const env = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
 const supabaseUrl = env.VITE_SUPABASE_URL || '';
@@ -1317,6 +1317,10 @@ function appraisalStatusLabel(status: string) {
 
 function SourceMethodologyPanel({ appraisal, passages }: { appraisal: Source['appraisal']; passages: Passage[] }) {
   const passageById = new Map(passages.map((passage) => [passage.id, passage]));
+  const rawDocumentAnalysis = appraisal.extensions?.document_analysis;
+  const documentAnalysis = rawDocumentAnalysis && typeof rawDocumentAnalysis === 'object'
+    ? rawDocumentAnalysis as SourceDocumentAnalysis
+    : undefined;
   const labels: Record<string, string> = {
     design_type: 'Study design', population: 'Population', geography: 'Geography',
     time_period: 'Time period', sample: 'Sample', identification_strategy: 'Identification strategy',
@@ -1329,7 +1333,26 @@ function SourceMethodologyPanel({ appraisal, passages }: { appraisal: Source['ap
   return <><div className="drawer-divider" /><h3>Methodological appraisal</h3><p className="drawer-footnote">{appraisalStatusLabel(appraisal.status || 'not_assessed')}{appraisal.provider ? ` · ${appraisal.provider}${appraisal.model ? `/${appraisal.model}` : ''}` : ''}. Model judgments are advisory and have not been independently verified.</p>{appraisal.reason && <p className="drawer-footnote">{appraisal.reason}</p>}{fields.length ? <div className="appraisal-fields">{fields.map(([name, field]) => {
     const linkedPassages = (field.passage_ids || []).map((id) => passageById.get(id)).filter((item): item is Passage => !!item);
     return <article className="appraisal-field" key={name}><div className="appraisal-field-heading"><b>{labels[name] || name.replace(/_/g, ' ')}</b><small>{appraisalStatusLabel(field.status)}</small></div><p>{field.value || 'Unknown'}</p><div className="appraisal-passage-links">{linkedPassages.map((passage) => <a className="appraisal-passage-link" key={passage.id} href={`#source-passage-${encodeURIComponent(passage.id)}`} aria-label={`View linked passage ${passage.locator}`}>{passage.locator}</a>)}{!linkedPassages.length && <small>{field.passage_ids?.length ? 'Linked passage unavailable in this source snapshot.' : 'No passage linked.'}</small>}</div></article>;
-  })}</div> : <p className="drawer-footnote">No field-level methodological appraisal is available.</p>}</>;
+  })}</div> : <p className="drawer-footnote">No field-level methodological appraisal is available.</p>}
+    {documentAnalysis && <><div className="drawer-divider" /><h3>Document analysis</h3><p className="drawer-footnote">{appraisalStatusLabel(documentAnalysis.status)}{documentAnalysis.provider ? ` · ${documentAnalysis.provider}${documentAnalysis.model ? `/${documentAnalysis.model}` : ''}` : ''}. This is a model-assisted reading of stored passages only; it is not independently verified and does not establish study quality.</p>{documentAnalysis.reason && <p className="drawer-footnote">{documentAnalysis.reason}</p>}
+      {documentAnalysis.question_fit && <article className="appraisal-field"><div className="appraisal-field-heading"><b>Fit to this question</b></div><p>{documentAnalysis.question_fit}</p><DocumentAnalysisPassageLinks passageIds={documentAnalysis.fit_passage_ids || []} passageById={passageById} /></article>}
+      {documentAnalysis.study_focus && <article className="appraisal-field"><div className="appraisal-field-heading"><b>Study focus</b></div><p>{documentAnalysis.study_focus}</p><DocumentAnalysisPassageLinks passageIds={documentAnalysis.study_focus_passage_ids || []} passageById={passageById} /></article>}
+      <DocumentAnalysisGroup title="Findings" items={documentAnalysis.findings || []} passageById={passageById} />
+      <DocumentAnalysisGroup title="Limitations" items={documentAnalysis.limitations || []} passageById={passageById} />
+      <DocumentAnalysisGroup title="Cannot conclude from stored passages" items={documentAnalysis.cannot_conclude || []} passageById={passageById} />
+      {(documentAnalysis.further_information_needed || []).length > 0 && <article className="appraisal-field"><div className="appraisal-field-heading"><b>Further information needed</b></div><ul>{documentAnalysis.further_information_needed?.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul><small>These are research-gap suggestions, not source findings.</small></article>}
+    </>}
+  </>;
+}
+
+function DocumentAnalysisPassageLinks({ passageIds, passageById }: { passageIds: string[]; passageById: Map<string, Passage> }) {
+  const linked = passageIds.map((id) => passageById.get(id)).filter((passage): passage is Passage => !!passage);
+  return <div className="appraisal-passage-links">{linked.map((passage) => <a className="appraisal-passage-link" key={passage.id} href={`#source-passage-${encodeURIComponent(passage.id)}`}>{passage.locator}</a>)}{!linked.length && <small>{passageIds.length ? 'Linked passage unavailable in this source snapshot.' : 'No passage linked.'}</small>}</div>;
+}
+
+function DocumentAnalysisGroup({ title, items, passageById }: { title: string; items: DocumentAnalysisPoint[]; passageById: Map<string, Passage> }) {
+  if (!items.length) return null;
+  return <section className="appraisal-fields"><h4>{title}</h4>{items.map((item, index) => <article className="appraisal-field" key={`${title}-${index}-${item.statement}`}><p>{item.statement}</p><DocumentAnalysisPassageLinks passageIds={item.passage_ids || []} passageById={passageById} /></article>)}</section>;
 }
 
 function SourceGovernancePanel({ governance }: { governance: Source['source_governance'] }) {

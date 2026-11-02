@@ -2212,5 +2212,22 @@
     "status": "DONE",
     "verification": "2026-11-03: Added bounded candidate review and workflow wiring, explicit UI opt-in defaulting off, typed provenance, metadata-only MCP candidate ledger, public-URL projection checks, and a client-neutral research Skill. Full backend 912 passed / 2 PostgreSQL-only skipped; Ruff check/format passed for 10 files; Vitest 23/23; production build; final fixture Playwright 54 passed / 19 gated skips; backlog/evaluation/benchmark/annotation/research-audit validators passed. No live model call, external MCP client, new provider, dependency, migration, or research-quality result was used.",
     "next_action": "Evaluate semantic accuracy and selection effects only after collecting independently reviewed labels and receiving explicit authorization for provider calls. Keep deterministic ranking as fallback and do not infer that MCP improves acquisition."
+  },
+  {
+    "id": "T-145",
+    "task": "Add passage-grounded per-document analysis and expand the read-only research MCP views",
+    "depends_on": [
+      "T-06",
+      "T-13",
+      "T-143",
+      "T-144"
+    ],
+    "priority": "P1",
+    "owner": "Codex",
+    "effort": "M",
+    "acceptance": "The existing appraisal operation can persist a bounded typed analysis for each source using only that source’s retained passages and exact passage IDs; report synthesis still validates findings against stored claims/passages; comparison remains source-diverse and independence-unknown; local read-only MCP exposes owner-scoped job, document, analysis, comparison, coverage, and report views under item-level external-disclosure and provenance gates; the client-neutral skill matches implemented tools. No new schema, ingestion engine, or uncontrolled inference path.",
+    "status": "DONE",
+    "verification": "2026-11-03: Implemented typed source-local document analysis in the existing appraisal operation, passage-ID validation, synthesis navigation guard, source-diverse claim comparison, and bounded owner-scoped read-only MCP views with item-level sharing, exact passage-digest, and passage/document/source-binding checks. Full backend: 923 passed, 2 PostgreSQL-only skipped; frontend Vitest 23/23; production build; targeted report-citations Playwright 49 passed; SQLite migration round-trip/Alembic check; changed Ruff check/format; project validators passed. No provider/model request or external MCP client was used. This verifies implementation and fixtures, not live AI analysis or research quality.",
+    "next_action": "For real model analysis, obtain fresh model-call authorization and evaluate independently labeled outputs; for external-client interoperability, connect a configured local client. Keep T-140/B-017 open for real nonacademic acquisition and B-010 open for independent scientific-quality evaluation."
   }
 ]

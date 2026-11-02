@@ -423,7 +423,6 @@ def test_deterministic_provider_fixtures_complete_and_persist_ai_pipeline(client
     assert provider_operations == [
         "veda_research_plan_selection_v1",
         "veda_appraisal_batch_v2",
-        "veda_comparison_batch_v1",
         "veda_report_draft_v4",
         "veda_semantic_report_audit_v1",
     ]
@@ -434,6 +433,7 @@ def test_deterministic_provider_fixtures_complete_and_persist_ai_pipeline(client
     assert report_response.status_code == 200
     report = report_response.json()
     assert sources and claims
+    assert len({claim["source_id"] for claim in claims}) == 1
     assert any(
         source["appraisal"]["status"] == "model_assessed_not_independently_verified"
         and source["appraisal"]["fields"]["design_type"]["value"] == "Randomized study"
@@ -477,5 +477,5 @@ def test_deterministic_provider_fixtures_complete_and_persist_ai_pipeline(client
         assert persisted_report.verification_json["record"]["semantic_assessment"]["method"] == (
             "model_assisted_not_independently_verified"
         )
-        assert len(usages) == 5
+        assert len(usages) == 4
         assert all(item.succeeded and item.reported_cost_usd == 0 for item in usages)

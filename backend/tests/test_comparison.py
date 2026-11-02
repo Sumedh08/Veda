@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -94,6 +95,109 @@ def test_report_comparison_omits_incomplete_persisted_rationale():
     assert "task-speed gain (passage f78029fa" not in rendered
     assert "stored rationale was incomplete" in rendered
     assert "The classification is provisional and model-assisted." not in rendered
+
+
+def test_comparison_sample_round_robins_claims_across_sources(client, monkeypatch):
+    project = client.post(
+        "/api/v1/projects", json={"title": "Balanced comparison", "domain": "testing"}
+    ).json()
+    job = client.post(
+        f"/api/v1/projects/{project['id']}/research-jobs",
+        json={
+            "question": "How do the interventions affect measured outcomes?",
+            "model_provider": "openrouter",
+            "model_name": "openrouter/free",
+            "idempotency_key": "balanced-comparison-contract",
+        },
+    ).json()
+    monkeypatch.setattr(
+        workflow,
+        "settings",
+        Settings(
+            llm_provider="openrouter",
+            openrouter_api_key="fixture-only",
+            openrouter_model="openrouter/free",
+            max_daily_model_calls=10,
+            max_daily_model_calls_per_user=10,
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_structured(_db, _job, **kwargs):
+        assert kwargs["schema_name"] == "veda_comparison_batch_v1"
+        captured.update(json.loads(kwargs["user"]))
+        return (
+            ResearchComparisonBatch(schema_version=1, relationships=[], competing_hypotheses=[]),
+            ProviderUsage(
+                provider="openrouter",
+                model="fixture/free",
+                input_tokens=80,
+                output_tokens=20,
+                reported_cost_usd=0.0,
+                estimated_cost_usd=0.0,
+                latency_ms=1,
+            ),
+        )
+
+    monkeypatch.setattr(workflow, "_call_structured", fake_structured)
+    with client.db_sessions() as db:
+        persisted_job = db.get(ResearchJob, job["id"])
+        persisted_job.current_stage = "comparison"
+        source_a = Source(
+            job_id=job["id"],
+            external_id="comparison-source-a",
+            title="Long report with many extracted claims",
+            retrieval_status="full_text_pdf",
+        )
+        source_b = Source(
+            job_id=job["id"],
+            external_id="comparison-source-b",
+            title="Independent report with one extracted claim",
+            retrieval_status="full_text_html",
+        )
+        db.add_all([source_a, source_b])
+        db.flush()
+        for index in range(30):
+            passage = add_test_passage(
+                db,
+                source_a,
+                ordinal=index,
+                locator=f"PDF p. {index + 1}",
+                content=f"The first report's finding {index} describes a measured intervention outcome.",
+            )
+            db.add(
+                Claim(
+                    job_id=job["id"],
+                    source_id=source_a.id,
+                    passage_id=passage.id,
+                    text=passage.content,
+                )
+            )
+        passage_b = add_test_passage(
+            db,
+            source_b,
+            ordinal=0,
+            locator="HTML Results section",
+            content="The second report's finding describes a different measured intervention outcome.",
+        )
+        db.add(
+            Claim(
+                job_id=job["id"],
+                source_id=source_b.id,
+                passage_id=passage_b.id,
+                text=passage_b.content,
+            )
+        )
+        db.commit()
+
+        result = workflow.execute_stage(db, workflow.job_snapshot(persisted_job))
+
+    sampled_claims = captured["claims"]
+    assert isinstance(sampled_claims, list)
+    assert len(sampled_claims) == 24
+    assert {item["source_id"] for item in sampled_claims} == {source_a.id, source_b.id}
+    assert sampled_claims[0]["source_id"] != sampled_claims[1]["source_id"]
+    assert result.event_data["candidate_claims"] == 24
 
 
 def test_comparison_persists_grounded_relations_and_rejects_fake_or_mis_scoped_links(

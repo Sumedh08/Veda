@@ -215,6 +215,28 @@ export type AppraisalValue = {
   status: string;
 };
 
+export type DocumentAnalysisPoint = {
+  statement: string;
+  passage_ids: string[];
+};
+
+export type SourceDocumentAnalysis = {
+  schema_version?: number;
+  status: string;
+  scope?: string;
+  reason?: string;
+  question_fit?: 'direct' | 'partial' | 'background' | 'insufficient';
+  fit_passage_ids?: string[];
+  study_focus?: string | null;
+  study_focus_passage_ids?: string[];
+  findings?: DocumentAnalysisPoint[];
+  limitations?: DocumentAnalysisPoint[];
+  cannot_conclude?: DocumentAnalysisPoint[];
+  further_information_needed?: string[];
+  provider?: string | null;
+  model?: string | null;
+};
+
 export type SourceMethodologicalAppraisal = {
   schema_version?: number;
   status?: string;
@@ -222,7 +244,7 @@ export type SourceMethodologicalAppraisal = {
   provider?: string | null;
   model?: string | null;
   fields?: Record<string, AppraisalValue>;
-  extensions?: Record<string, unknown>;
+  extensions?: Record<string, unknown> & { document_analysis?: SourceDocumentAnalysis };
 };
 
 export type ClaimMethodologyAppraisal = {

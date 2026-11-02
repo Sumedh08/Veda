@@ -34,6 +34,7 @@ def candidate_review_payload(
     occurrences: list[dict[str, Any]],
     *,
     maximum_candidates: int = MAX_REVIEW_CANDIDATES,
+    subquestions: list[str] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Build a bounded metadata-only pool that includes lexical misses.
 
@@ -137,7 +138,14 @@ def candidate_review_payload(
             }
         )
         reviewed.append(item)
-    return {"question": question.strip(), "candidates": payload_candidates}, reviewed
+    payload = {"question": question.strip(), "candidates": payload_candidates}
+    if subquestions is not None:
+        payload["subquestions"] = [
+            item.strip()[:300]
+            for item in subquestions[:8]
+            if isinstance(item, str) and item.strip()
+        ]
+    return payload, reviewed
 
 
 def attach_candidate_relevance_review(

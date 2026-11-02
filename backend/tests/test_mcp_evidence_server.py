@@ -10,12 +10,25 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from app.mcp_evidence_server import (
+    _analysis_passage_locators,
+    _passage_matches_source_provenance,
+    _passage_summary,
+    _source_provenance_has_passages,
     create_evidence_mcp_server,
     validate_loopback_api_url,
 )
-from app.models import DiscoveryCandidate, Passage, Project, ResearchJob, RetrievedDocument, Source
+from app.models import (
+    DiscoveryCandidate,
+    Passage,
+    Project,
+    ResearchJob,
+    ResearchReport,
+    RetrievedDocument,
+    Source,
+)
 from app.research.candidate_relevance import score_candidate_relevance
 
 
@@ -128,6 +141,226 @@ def test_loopback_api_url_rejects_remote_hosts_and_credentials():
         validate_loopback_api_url("http://user:password@127.0.0.1:8000")
 
 
+def test_mcp_derived_text_requires_matching_passage_and_document_hashes():
+    source_id = str(uuid4())
+    document_id = str(uuid4())
+    passage_id = str(uuid4())
+    provenance = {
+        "source": {"id": source_id},
+        "passages": [
+            {
+                "id": passage_id,
+                "document_id": document_id,
+                "content_hash": hashlib.sha256(b"passage").hexdigest(),
+                "content_hash_verified": True,
+            }
+        ],
+        "documents": [
+            {"id": document_id, "document_sha256": hashlib.sha256(b"document").hexdigest()}
+        ],
+    }
+
+    assert _source_provenance_has_passages(
+        provenance, source_id=source_id, passage_ids={passage_id}
+    )
+    provenance["passages"][0]["content_hash_verified"] = False
+    assert not _source_provenance_has_passages(
+        provenance, source_id=source_id, passage_ids={passage_id}
+    )
+    provenance["passages"][0]["content_hash_verified"] = True
+    provenance["passages"][0]["content_hash"] = None
+    assert not _source_provenance_has_passages(
+        provenance, source_id=source_id, passage_ids={passage_id}
+    )
+    assert not _source_provenance_has_passages(
+        provenance, source_id=source_id, passage_ids={str(uuid4())}
+    )
+
+
+def test_mcp_passage_text_is_withheld_when_saved_hash_does_not_match():
+    content = "The report measures distribution system flexibility."
+    source_id = str(uuid4())
+    document_id = str(uuid4())
+    source = {
+        "id": source_id,
+        "retrieval_status": "full_text_pdf",
+        "retrieval": {
+            "license": "cc-by",
+            "license_url": "https://creativecommons.org/licenses/by/4.0/",
+            "license_evidence": "verified item license",
+            "rights_assessment": {
+                "analysis": "PERMITTED",
+                "retention": "LICENSE_SCOPED",
+                "sharing": "LICENSE_SCOPED",
+                "basis": "verified_item_license",
+            },
+        },
+    }
+    passage = {
+        "id": str(uuid4()),
+        "source_id": source_id,
+        "document_id": document_id,
+        "locator": "PDF p. 4",
+        "content": content,
+        "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "access_level": "full_text_pdf",
+        "content_withheld_reason": None,
+        "document": {
+            "id": document_id,
+            "source_id": source_id,
+            "document_sha256": hashlib.sha256(b"raw PDF").hexdigest(),
+        },
+    }
+
+    permitted, _ = _passage_summary(source, passage, remaining_characters=1000)
+    assert permitted["content"] == content
+
+    passage["content"] = "Changed text with stale digest."
+    withheld, _ = _passage_summary(source, passage, remaining_characters=1000)
+    assert withheld["content"] is None
+    assert withheld["external_disclosure"] == "metadata_only"
+
+
+def test_document_analysis_returns_every_referenced_locator_within_schema_bound():
+    locators = {f"passage-{index}": {"passage_id": f"passage-{index}"} for index in range(33)}
+
+    returned, truncated = _analysis_passage_locators(locators, set(locators))
+
+    assert [item["passage_id"] for item in returned] == sorted(locators)
+    assert not truncated
+
+    returned, truncated = _analysis_passage_locators(locators, set(locators) | {"missing"})
+
+    assert len(returned) == 33
+    assert truncated
+
+
+def test_mcp_passage_disclosure_requires_source_and_document_relationships():
+    source_id = str(uuid4())
+    document_id = str(uuid4())
+    passage_id = str(uuid4())
+    text = "The verified report describes a source-linked outcome."
+    passage_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    document_hash = hashlib.sha256(b"verified original document").hexdigest()
+    source = {
+        "id": source_id,
+        "retrieval_status": "full_text_pdf",
+        "retrieval": {
+            "license": "cc-by",
+            "license_url": "https://creativecommons.org/licenses/by/4.0/",
+            "license_evidence": "verified item license",
+            "rights_assessment": {
+                "analysis": "PERMITTED",
+                "retention": "LICENSE_SCOPED",
+                "sharing": "LICENSE_SCOPED",
+                "basis": "verified_item_license",
+            },
+        },
+    }
+    provenance = {
+        "source": source,
+        "passages": [
+            {
+                "id": passage_id,
+                "document_id": document_id,
+                "content_hash": passage_hash,
+                "content_hash_verified": True,
+            }
+        ],
+        "documents": [{"id": document_id, "document_sha256": document_hash}],
+    }
+    passage = {
+        "id": passage_id,
+        "source_id": source_id,
+        "document_id": document_id,
+        "content": text,
+        "content_hash": passage_hash,
+        "document": {
+            "id": document_id,
+            "source_id": source_id,
+            "document_sha256": document_hash,
+        },
+    }
+
+    assert _passage_matches_source_provenance(
+        passage,
+        provenance,
+        source_id=source_id,
+        passage_id=passage_id,
+    )
+
+    mismatched_document = {**passage, "document_id": str(uuid4())}
+    assert not _passage_matches_source_provenance(
+        mismatched_document,
+        provenance,
+        source_id=source_id,
+        passage_id=passage_id,
+    )
+    mismatched_source = {**passage, "source_id": str(uuid4())}
+    assert not _passage_matches_source_provenance(
+        mismatched_source,
+        provenance,
+        source_id=source_id,
+        passage_id=passage_id,
+    )
+    mismatched_id = {**passage, "id": str(uuid4())}
+    assert not _passage_matches_source_provenance(
+        mismatched_id,
+        provenance,
+        source_id=source_id,
+        passage_id=passage_id,
+    )
+    foreign_document = {
+        **passage,
+        "document": {**passage["document"], "source_id": str(uuid4())},
+    }
+    summary, _ = _passage_summary(source, foreign_document, remaining_characters=1000)
+    assert summary["content"] is None
+
+
+def test_mcp_evidence_search_withholds_passage_from_foreign_document_source(client):
+    source_id, passage_id = _add_evidence(
+        client,
+        owner_id=client.test_user["id"],
+        sharing="LICENSE_SCOPED",
+        title="Licensed grid report",
+        passage_text="Grid frequency response stabilizes variable power systems.",
+    )
+    foreign_source_id, _foreign_passage_id = _add_evidence(
+        client,
+        owner_id=client.test_user["id"],
+        sharing="LICENSE_SCOPED",
+        title="Different licensed report",
+        passage_text="This unrelated document does not match the search phrase.",
+    )
+    with client.db_sessions() as db:
+        passage = db.get(Passage, passage_id)
+        foreign_document = db.scalar(
+            select(RetrievedDocument).where(RetrievedDocument.source_id == foreign_source_id)
+        )
+        passage.document_id = foreign_document.id
+        db.commit()
+
+    server = create_evidence_mcp_server(client, api_prefix="/api/v1")
+    mcp = pytest.importorskip("mcp", reason="install the optional backend mcp extra")
+
+    async def search():
+        async with mcp.Client(server) as protocol_client:
+            return await protocol_client.call_tool(
+                "search_research_evidence", {"query": "frequency response", "limit": 5}
+            )
+
+    result = asyncio.run(search())
+
+    assert not result.is_error
+    output = json.loads(result.content[0].text)
+    matched_source = next(
+        item for item in output["results"] if item["source"]["source_id"] == source_id
+    )
+    assert matched_source["passages"][0]["passage_id"] == passage_id
+    assert matched_source["passages"][0]["content"] is None
+
+
 def test_evidence_search_api_returns_owner_scoped_source_linked_passages(client):
     text = "Grid operators used frequency response to stabilize variable power generation."
     source_id, passage_id = _add_evidence(
@@ -187,6 +420,18 @@ def test_source_provenance_api_returns_bounded_locators_without_passage_text(cli
     assert payload["passages"][0]["id"] == passage_id
     assert payload["passages"][0]["locator"] == "PDF p. 2"
     assert "content" not in payload["passages"][0]
+    assert payload["passages"][0]["content_hash_verified"] is True
+    assert payload["documents"][0]["document_sha256"]
+    assert payload["documents"][0]["metadata"]["page_count"] == 4
+    assert "content" not in payload["documents"][0]
+
+    with client.db_sessions() as db:
+        passage = db.get(Passage, passage_id)
+        passage.content = "Tampered after the original digest was recorded."
+        db.commit()
+    mismatched_response = client.get(f"/api/v1/sources/{source_id}/provenance")
+    assert mismatched_response.status_code == 200
+    assert mismatched_response.json()["passages"][0]["content_hash_verified"] is False
 
     foreign_source_id, _foreign_passage_id = _add_evidence(
         client,
@@ -197,6 +442,78 @@ def test_source_provenance_api_returns_bounded_locators_without_passage_text(cli
     )
     foreign_response = client.get(f"/api/v1/sources/{foreign_source_id}/provenance")
     assert foreign_response.status_code == 404
+
+
+def test_mcp_document_analysis_reports_truncated_provenance_without_disclosing_analysis(client):
+    source_id, initial_passage_id = _add_evidence(
+        client,
+        owner_id=client.test_user["id"],
+        sharing="LICENSE_SCOPED",
+        title="Bounded analysis provenance report",
+        passage_text="A retained passage from the verified document.",
+    )
+    with client.db_sessions() as db:
+        initial_passage = db.get(Passage, initial_passage_id)
+        document = db.get(RetrievedDocument, initial_passage.document_id)
+        source = db.get(Source, source_id)
+        passage_ids = [initial_passage_id]
+        for ordinal in range(1, 51):
+            passage_id = str(uuid4())
+            content = f"Stored source passage {ordinal} includes a distinct bounded result."
+            db.add(
+                Passage(
+                    id=passage_id,
+                    source_id=source_id,
+                    document_id=document.id,
+                    identity_key=hashlib.sha256(f"identity-{passage_id}".encode()).hexdigest(),
+                    identity_version=1,
+                    ordinal=ordinal,
+                    locator=f"PDF p. {ordinal + 1}",
+                    content=content,
+                    content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                    access_level="full_text_pdf",
+                    truncated=False,
+                )
+            )
+            passage_ids.append(passage_id)
+        source.appraisal_json = {
+            "schema_version": 1,
+            "status": "model_assessed_not_independently_verified",
+            "fields": {},
+            "extensions": {
+                "document_analysis": {
+                    "schema_version": 1,
+                    "status": "model_assessed_not_independently_verified",
+                    "scope": "persisted_passages_only",
+                    "question_fit": "direct",
+                    "fit_passage_ids": [passage_ids[-1]],
+                    "study_focus": None,
+                    "study_focus_passage_ids": [],
+                    "findings": [],
+                    "limitations": [],
+                    "cannot_conclude": [],
+                    "further_information_needed": [],
+                },
+            },
+        }
+        db.commit()
+
+    mcp = pytest.importorskip("mcp", reason="install the optional backend mcp extra")
+    server = create_evidence_mcp_server(client, api_prefix="/api/v1")
+
+    async def inspect_analysis():
+        async with mcp.Client(server) as protocol_client:
+            return await protocol_client.call_tool(
+                "get_document_analysis", {"source_id": source_id}
+            )
+
+    result = asyncio.run(inspect_analysis())
+
+    assert not result.is_error
+    output = json.loads(result.content[0].text)
+    assert output["status"] == "provenance_incomplete"
+    assert output["passage_locators_has_more"] is True
+    assert "analysis" not in output
 
 
 def test_mcp_protocol_exposes_licensed_passage_and_withholds_private_research_text(client):
@@ -227,6 +544,101 @@ def test_mcp_protocol_exposes_licensed_passage_and_withholds_private_research_te
         passage_text=unverified_license_text,
         verified_license=False,
     )
+    with client.db_sessions() as db:
+        permitted_source = db.get(Source, permitted_source_id)
+        permitted_job_id = permitted_source.job_id
+        permitted_source.appraisal_json = {
+            "schema_version": 1,
+            "status": "model_assessed_not_independently_verified",
+            "fields": {},
+            "extensions": {
+                "document_analysis": {
+                    "schema_version": 1,
+                    "status": "model_assessed_not_independently_verified",
+                    "scope": "persisted_passages_only",
+                    "question_fit": "direct",
+                    "fit_passage_ids": [permitted_passage_id],
+                    "study_focus": "Grid frequency response.",
+                    "study_focus_passage_ids": [permitted_passage_id],
+                    "findings": [
+                        {
+                            "statement": "The report describes grid frequency response.",
+                            "passage_ids": [permitted_passage_id],
+                        }
+                    ],
+                    "limitations": [],
+                    "cannot_conclude": [],
+                    "further_information_needed": [],
+                    "provider": "fixture",
+                    "model": "fixture-model",
+                }
+            },
+        }
+        private_source = db.get(Source, private_source_id)
+        private_document = db.scalar(
+            select(RetrievedDocument).where(RetrievedDocument.source_id == private_source_id)
+        )
+        private_document.metadata_json = {
+            **private_document.metadata_json,
+            "sections": [
+                {
+                    "section_id": "result",
+                    "original_heading": "PRIVATE REPORT FINDING MUST NOT LEAK",
+                    "normalized_type": "results",
+                    "section_path": ["Results"],
+                    "ordinal": 1,
+                    "source_locator": "PDF p. 3",
+                }
+            ],
+        }
+        private_source.appraisal_json = {
+            "schema_version": 1,
+            "status": "model_assessed_not_independently_verified",
+            "fields": {},
+            "extensions": {
+                "document_analysis": {
+                    "schema_version": 1,
+                    "status": "model_assessed_not_independently_verified",
+                    "scope": "persisted_passages_only",
+                    "question_fit": "direct",
+                    "fit_passage_ids": [private_passage_id],
+                    "study_focus": "Private findings.",
+                    "study_focus_passage_ids": [private_passage_id],
+                    "findings": [
+                        {
+                            "statement": "PRIVATE DERIVED ANALYSIS MUST NOT LEAK.",
+                            "passage_ids": [private_passage_id],
+                        }
+                    ],
+                    "limitations": [],
+                    "cannot_conclude": [],
+                    "further_information_needed": [],
+                    "provider": "fixture",
+                    "model": "fixture-model",
+                }
+            },
+        }
+        db.add(
+            ResearchReport(
+                job_id=permitted_job_id,
+                status="completed_with_limitations",
+                body_markdown="# Evidence map\n\nThe report describes grid response. [S1]",
+                citation_map_json={
+                    "schema_version": 1,
+                    "citations": {
+                        "S1": {
+                            "source_id": permitted_source_id,
+                            "title": permitted_source.title,
+                            "doi": permitted_source.doi,
+                            "url": permitted_source.url,
+                            "passages": [permitted_passage_id],
+                        }
+                    },
+                },
+                verification_json={"schema_version": 1, "record": {"schema_version": 1}},
+            )
+        )
+        db.commit()
     server = create_evidence_mcp_server(client, api_prefix="/api/v1")
     protocol_client = pytest.importorskip(
         "mcp", reason="install the optional backend mcp extra"
@@ -239,6 +651,12 @@ def test_mcp_protocol_exposes_licensed_passage_and_withholds_private_research_te
                 "search_research_evidence",
                 "get_evidence_passage",
                 "get_source_provenance",
+                "get_document_structure",
+                "get_research_job_status",
+                "get_document_analysis",
+                "get_evidence_comparison",
+                "get_evidence_coverage",
+                "get_research_report",
             }
             result = await mcp_client.call_tool(
                 "search_research_evidence", {"query": "frequency response", "limit": 5}
@@ -254,6 +672,30 @@ def test_mcp_protocol_exposes_licensed_passage_and_withholds_private_research_te
             private_passage_tool = await mcp_client.call_tool(
                 "get_evidence_passage", {"passage_id": private_passage_id}
             )
+            analysis_tool = await mcp_client.call_tool(
+                "get_document_analysis", {"source_id": permitted_source_id}
+            )
+            structure_tool = await mcp_client.call_tool(
+                "get_document_structure", {"source_id": permitted_source_id}
+            )
+            private_analysis_tool = await mcp_client.call_tool(
+                "get_document_analysis", {"source_id": private_source_id}
+            )
+            private_structure_tool = await mcp_client.call_tool(
+                "get_document_structure", {"source_id": private_source_id}
+            )
+            status_tool = await mcp_client.call_tool(
+                "get_research_job_status", {"job_id": permitted_job_id}
+            )
+            report_tool = await mcp_client.call_tool(
+                "get_research_report", {"job_id": permitted_job_id}
+            )
+            coverage_tool = await mcp_client.call_tool(
+                "get_evidence_coverage", {"job_id": permitted_job_id}
+            )
+            comparison_tool = await mcp_client.call_tool(
+                "get_evidence_comparison", {"job_id": permitted_job_id}
+            )
             unverified_passage_tool = await mcp_client.call_tool(
                 "get_evidence_passage", {"passage_id": unverified_passage_id}
             )
@@ -268,6 +710,14 @@ def test_mcp_protocol_exposes_licensed_passage_and_withholds_private_research_te
                 private_source_id,
                 json.loads(unverified_passage_tool.content[0].text),
                 unverified_source_id,
+                json.loads(analysis_tool.content[0].text),
+                json.loads(structure_tool.content[0].text),
+                json.loads(private_analysis_tool.content[0].text),
+                json.loads(private_structure_tool.content[0].text),
+                json.loads(status_tool.content[0].text),
+                json.loads(report_tool.content[0].text),
+                json.loads(coverage_tool.content[0].text),
+                json.loads(comparison_tool.content[0].text),
             )
 
     (
@@ -278,6 +728,14 @@ def test_mcp_protocol_exposes_licensed_passage_and_withholds_private_research_te
         private_source_id,
         unverified_passage_result,
         unverified_source_id,
+        analysis_result,
+        structure_result,
+        private_analysis_result,
+        private_structure_result,
+        status_result,
+        report_result,
+        coverage_result,
+        comparison_result,
     ) = asyncio.run(call_server())
     returned_text = [
         passage["content"]
@@ -305,6 +763,20 @@ def test_mcp_protocol_exposes_licensed_passage_and_withholds_private_research_te
     assert private_passage_result["passage"]["content"] is None
     assert unverified_passage_result["source"]["source_id"] == unverified_source_id
     assert unverified_passage_result["passage"]["content"] is None
+    assert analysis_result["external_disclosure"] == "license_scoped_derived_analysis"
+    assert analysis_result["analysis"]["findings"][0]["passage_ids"] == [permitted_passage_id]
+    assert structure_result["documents"][0]["parser"]["page_count"] == 4
+    assert structure_result["documents"][0]["document_sha256"]
+    assert permitted_text not in json.dumps(structure_result)
+    assert private_analysis_result["external_disclosure"] == "metadata_only"
+    assert "PRIVATE DERIVED ANALYSIS MUST NOT LEAK" not in json.dumps(private_analysis_result)
+    assert "PRIVATE REPORT FINDING MUST NOT LEAK" not in json.dumps(private_structure_result)
+    assert status_result["id"] == permitted_job_id
+    assert report_result["external_disclosure"] == "license_scoped_report"
+    assert report_result["body_markdown"].startswith("# Evidence map")
+    assert coverage_result["job_id"] == permitted_job_id
+    assert coverage_result["interpretation_limit"].startswith("Operational evidence coverage")
+    assert comparison_result["external_disclosure"] == "metadata_only"
 
 
 def test_mcp_candidate_ledger_is_bounded_owner_scoped_and_metadata_only(client):
@@ -419,7 +891,7 @@ def test_stdio_transport_works_with_official_mcp_client_protocol_only():
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
     del mcp
-    source_id, passage_id = str(uuid4()), str(uuid4())
+    source_id, passage_id, document_id = str(uuid4()), str(uuid4()), str(uuid4())
     passage_text = "A verified publication reports a bounded measurable outcome."
     passage_hash = hashlib.sha256(passage_text.encode()).hexdigest()
     source = {
@@ -449,13 +921,15 @@ def test_stdio_transport_works_with_official_mcp_client_protocol_only():
     passage = {
         "id": passage_id,
         "source_id": source_id,
-        "document_id": str(uuid4()),
+        "document_id": document_id,
         "locator": "PDF p. 4",
         "content": passage_text,
         "content_hash": passage_hash,
         "access_level": "full_text_pdf",
         "content_withheld_reason": None,
         "document": {
+            "id": document_id,
+            "source_id": source_id,
             "source_version": "v1",
             "document_sha256": hashlib.sha256(b"protocol-test-document").hexdigest(),
             "media_type": "application/pdf",

@@ -46,10 +46,66 @@ class AppraisalField(BaseModel):
     passage_ids: list[str] = Field(max_length=3)
 
 
+class DocumentAnalysisPointDraft(BaseModel):
+    """One provisional document interpretation anchored to that source's passages."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    statement: str = Field(min_length=1, max_length=180)
+    passage_ids: list[str] = Field(min_length=1, max_length=3)
+
+    @field_validator("passage_ids")
+    @classmethod
+    def unique_passage_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("document analysis passage IDs must be unique")
+        return value
+
+
+class SourceDocumentAnalysisDraft(BaseModel):
+    """Question-specific, passage-linked interpretation of one retrieved source."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question_fit: Literal["direct", "partial", "background", "insufficient"]
+    fit_passage_ids: list[str] = Field(max_length=3)
+    study_focus: str | None = Field(default=None, max_length=180)
+    study_focus_passage_ids: list[str] = Field(max_length=3)
+    findings: list[DocumentAnalysisPointDraft] = Field(max_length=3)
+    limitations: list[DocumentAnalysisPointDraft] = Field(max_length=3)
+    cannot_conclude: list[DocumentAnalysisPointDraft] = Field(max_length=3)
+    further_information_needed: list[Annotated[str, Field(min_length=1, max_length=160)]] = Field(
+        max_length=3
+    )
+
+    @field_validator("fit_passage_ids", "study_focus_passage_ids")
+    @classmethod
+    def unique_analysis_passage_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("document analysis passage IDs must be unique")
+        return value
+
+    @field_validator("study_focus_passage_ids")
+    @classmethod
+    def require_focus_locator_when_focus_is_returned(cls, value: list[str], info) -> list[str]:
+        focus = info.data.get("study_focus")
+        if bool(focus) != bool(value):
+            raise ValueError("study focus and its passage links must be supplied together")
+        return value
+
+    @field_validator("fit_passage_ids")
+    @classmethod
+    def require_fit_locator_for_positive_fit(cls, value: list[str], info) -> list[str]:
+        if info.data.get("question_fit") != "insufficient" and not value:
+            raise ValueError("a question-fit judgment requires passage support")
+        return value
+
+
 class SourceAppraisal(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_id: str
     fields: list[AppraisalField] = Field(max_length=15)
+    document_analysis: SourceDocumentAnalysisDraft | None = None
 
 
 class ClaimEconomicFacetDraft(BaseModel):

@@ -43,7 +43,10 @@ def test_review_payload_is_metadata_only_bounded_and_includes_lexical_misses():
     ]
 
     payload, reviewed = candidate_review_payload(
-        "What evidence links care continuity to hospitalization?", rows, maximum_candidates=8
+        "What evidence links care continuity to hospitalization?",
+        rows,
+        maximum_candidates=8,
+        subquestions=["Which populations were studied?", "What outcomes were measured?"],
     )
 
     assert len(reviewed) == 8
@@ -54,6 +57,10 @@ def test_review_payload_is_metadata_only_bounded_and_includes_lexical_misses():
     assert "10.5555" not in serialized
     assert "Private" not in serialized
     assert payload["question"] == "What evidence links care continuity to hospitalization?"
+    assert payload["subquestions"] == [
+        "Which populations were studied?",
+        "What outcomes were measured?",
+    ]
 
 
 def test_ai_direct_relevance_can_recover_a_lexical_miss_without_changing_other_gates():

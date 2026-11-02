@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 from support import add_test_passage
 
@@ -16,6 +18,54 @@ from app.research.llm_tasks import (
     ResearchAppraisalBatch,
     SourceAppraisal,
 )
+
+
+def test_document_analysis_contract_requires_passage_links_for_source_findings():
+    payload = {
+        "source_id": "source-a",
+        "fields": [],
+        "document_analysis": {
+            "question_fit": "partial",
+            "fit_passage_ids": ["passage-a"],
+            "study_focus": "The report evaluates a city heat-mitigation programme.",
+            "study_focus_passage_ids": ["passage-a"],
+            "findings": [
+                {
+                    "statement": "Tree-canopy interventions reduced measured surface temperatures.",
+                    "passage_ids": ["passage-a"],
+                }
+            ],
+            "limitations": [],
+            "cannot_conclude": [],
+            "further_information_needed": ["Independent replication across additional cities."],
+        },
+    }
+
+    appraisal = SourceAppraisal.model_validate(payload)
+
+    assert appraisal.document_analysis is not None
+    assert appraisal.document_analysis.question_fit == "partial"
+    assert appraisal.document_analysis.findings[0].passage_ids == ["passage-a"]
+
+
+def test_document_analysis_schema_rejects_unanchored_findings():
+    with pytest.raises(ValidationError):
+        SourceAppraisal.model_validate(
+            {
+                "source_id": "source-a",
+                "fields": [],
+                "document_analysis": {
+                    "question_fit": "direct",
+                    "fit_passage_ids": ["passage-a"],
+                    "study_focus": "A study of heat interventions.",
+                    "study_focus_passage_ids": ["passage-a"],
+                    "findings": [{"statement": "A result without a locator.", "passage_ids": []}],
+                    "limitations": [],
+                    "cannot_conclude": [],
+                    "further_information_needed": [],
+                },
+            }
+        )
 
 
 def test_appraisal_partition_splits_large_source_claim_set_without_duplicate_source_owner():
@@ -139,6 +189,21 @@ def test_appraisal_is_versioned_and_foreign_or_missing_evidence_stays_unknown(cl
                         ),
                         AppraisalField(name="missingness", value="unknown", passage_ids=[]),
                     ],
+                    document_analysis={
+                        "question_fit": "partial",
+                        "fit_passage_ids": [first_passage.id],
+                        "study_focus": "A randomized worker task study.",
+                        "study_focus_passage_ids": [first_passage.id],
+                        "findings": [
+                            {
+                                "statement": "The study randomized 120 workers.",
+                                "passage_ids": [first_passage.id],
+                            }
+                        ],
+                        "limitations": [],
+                        "cannot_conclude": [],
+                        "further_information_needed": ["Replication in additional settings."],
+                    },
                 ),
                 SourceAppraisal(source_id="invented-source", fields=[]),
                 SourceAppraisal(source_id=second_source.id, fields=[]),
@@ -230,11 +295,15 @@ def test_appraisal_is_versioned_and_foreign_or_missing_evidence_stays_unknown(cl
         assert fields["population"]["passage_ids"] == []
         assert fields["missingness"]["value"] == "unknown"
         assert fields["comparator"]["value"] == "unknown"
+        document_analysis = source_result["extensions"]["document_analysis"]
+        assert document_analysis["status"] == "model_assessed_not_independently_verified"
+        assert document_analysis["scope"] == "persisted_passages_only"
+        assert document_analysis["findings"][0]["passage_ids"] == [first_passage.id]
+        assert document_analysis["provider"] == "openrouter"
 
         duplicate_source_result = db.get(Source, second_source.id).appraisal_json
         assert duplicate_source_result["status"] == "needs_review"
         assert duplicate_source_result["fields"]["design_type"]["value"] == "unknown"
-
         claims = {
             claim.id: claim for claim in db.scalars(select(Claim).where(Claim.job_id == job["id"]))
         }
@@ -262,6 +331,122 @@ def test_appraisal_is_versioned_and_foreign_or_missing_evidence_stays_unknown(cl
         )
         assert usage_row is not None
         assert usage_row.response_repair == "markdown_json_fence_removed"
+
+
+def test_document_analysis_persistence_rejects_foreign_passage_ids(client, monkeypatch):
+    project = client.post(
+        "/api/v1/projects", json={"title": "Cross source", "domain": "testing"}
+    ).json()
+    job = client.post(
+        f"/api/v1/projects/{project['id']}/research-jobs",
+        json={
+            "question": "What did each study find?",
+            "model_provider": "openrouter",
+            "model_name": "openrouter/free",
+            "idempotency_key": "foreign-analysis-passage",
+        },
+    ).json()
+    monkeypatch.setattr(
+        workflow,
+        "settings",
+        Settings(
+            llm_provider="openrouter",
+            openrouter_api_key="fixture-only",
+            openrouter_model="openrouter/free",
+            max_daily_model_calls=10,
+            max_daily_model_calls_per_user=10,
+        ),
+    )
+    with client.db_sessions() as db:
+        persisted_job = db.get(ResearchJob, job["id"])
+        persisted_job.current_stage = "appraisal"
+        source_a = Source(
+            job_id=job["id"],
+            external_id="source:a",
+            title="Study A",
+            retrieval_status="full_text_pdf",
+        )
+        source_b = Source(
+            job_id=job["id"],
+            external_id="source:b",
+            title="Study B",
+            retrieval_status="full_text_pdf",
+        )
+        db.add_all([source_a, source_b])
+        db.flush()
+        passage_a = add_test_passage(
+            db, source_a, ordinal=1, locator="p. 1", content="Study A examined an intervention."
+        )
+        passage_b = add_test_passage(
+            db, source_b, ordinal=1, locator="p. 2", content="Study B reports a different outcome."
+        )
+        db.add_all(
+            [
+                Claim(
+                    job_id=job["id"],
+                    source_id=source_a.id,
+                    passage_id=passage_a.id,
+                    text=passage_a.content,
+                ),
+                Claim(
+                    job_id=job["id"],
+                    source_id=source_b.id,
+                    passage_id=passage_b.id,
+                    text=passage_b.content,
+                ),
+            ]
+        )
+        db.commit()
+
+    output = ResearchAppraisalBatch(
+        schema_version=2,
+        source_appraisals=[
+            SourceAppraisal(
+                source_id=source_a.id,
+                fields=[],
+                document_analysis={
+                    "question_fit": "direct",
+                    "fit_passage_ids": [passage_a.id],
+                    "study_focus": None,
+                    "study_focus_passage_ids": [],
+                    "findings": [
+                        {"statement": "A forged cross-source link.", "passage_ids": [passage_b.id]}
+                    ],
+                    "limitations": [],
+                    "cannot_conclude": [],
+                    "further_information_needed": [],
+                },
+            )
+        ],
+        claim_assessments=[],
+    )
+    usage = ProviderUsage(
+        provider="openrouter",
+        model="fixture/free",
+        input_tokens=10,
+        output_tokens=10,
+        reported_cost_usd=0,
+        estimated_cost_usd=0,
+        latency_ms=1,
+    )
+
+    class FixtureProvider:
+        def complete_json(self, **_kwargs):
+            return SimpleNamespace(value=output, usage=usage)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(workflow, "configured_provider", FixtureProvider)
+    with client.db_sessions() as db:
+        persisted_job = db.get(ResearchJob, job["id"])
+        result = workflow.execute_stage(db, workflow.job_snapshot(persisted_job))
+        workflow.persist_result(db, persisted_job, result)
+        db.commit()
+        saved = db.get(Source, source_a.id).appraisal_json["extensions"]["document_analysis"]
+        assert saved["status"] == "needs_review"
+        assert "findings" not in saved
+        assert "passage not belonging" in saved["reason"]
 
 
 def test_appraisal_schema_requires_explicit_version_and_rejects_unknown_fields():

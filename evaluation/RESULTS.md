@@ -1,6 +1,6 @@
 # Evaluation and verification results
 
-Updated 2026-11-01 through T-139. The earlier verification entries are historical snapshots. This ledger separates local software checks, synthetic metric-logic fixtures, earlier failed T-112/T-119/T-123 attempts, the successful real Sarvam GLM-5.3 Flash workflow, and actual research-quality evaluation. **The T-126 workflow passed operationally; no Veda research output has an expert-reviewed quality score.**
+Updated 2026-11-02 through T-140. The earlier verification entries are historical snapshots. This ledger separates local software checks, synthetic metric-logic fixtures, earlier failed T-112/T-119/T-123 attempts, the successful real Sarvam GLM-5.3 Flash workflow, and actual research-quality evaluation. **The T-126 workflow passed operationally; no Veda research output has an expert-reviewed quality score.**
 
 ## Current local verification
 

@@ -1,7 +1,7 @@
 # Adaptive evidence sufficiency transferability set
 
-**Frozen before implementation:** 2026-11-02  
-**Baseline commit:** `26952e8a866980b82d5a9e61322157f5a216dd69`  
+**Frozen before implementation:** 2026-11-02
+**Baseline commit:** `26952e8a866980b82d5a9e61322157f5a216dd69`
 **Protocol version:** `adaptive-sufficiency-holdouts-v1`
 
 This set is fixed before changes to sufficiency, evidence-independence, or report status logic. The questions are evaluation inputs only; production code must not contain these strings, their expected answers, organizations, or publications. No target organization or URL is supplied in any question.
@@ -63,4 +63,3 @@ Evidence needs to distinguish congestion measures from delivery outcomes, countr
 - Define sufficiency from covered material requirements, source applicability, evidence roles, investigation independence, contrary evidence, unresolved gaps, and completed bounded searches. Do not define it from a fixed source count.
 - For each case report the question-specific plan, requirement coverage, discovered/verified/acquired sources, independent content-bearing investigations known versus unknown, contrary evidence, acquisition failures, report decision and reasons, browser inspection, requests/costs, and unmeasured review requirements.
 - No live provider request, paid inference, or content fetch is authorized by this evaluation plan. Use saved artifacts and offline deterministic tests unless a separately verified free-resource preflight permits a bounded request.
-

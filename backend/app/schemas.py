@@ -2224,6 +2224,27 @@ class OfficialSitePublicationOut(BaseModel):
     ]
 
 
+class CatalogPublicationProvenanceOut(BaseModel):
+    """Item-level catalog corroboration; distinct from rights and quality."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal[1]
+    provider: Literal["OpenAIRE"]
+    verification_status: Literal["catalog_corroborated"]
+    verification_method: Literal["exact_catalog_title_location_and_publisher_domain_match"]
+    catalog_record_id: str = Field(pattern=r"^[A-Za-z0-9_:.\-]{1,300}$")
+    publisher_organization_id: str = Field(pattern=r"^[A-Za-z0-9_:.\-]{1,300}$")
+    organization_identity_status: Literal["VERIFIED_DOMAIN_SPECIALIST"]
+    official_domain: str = Field(pattern=r"^[a-z0-9.-]{1,253}$")
+    discovery_lead_url: str = Field(pattern=r"^https://", max_length=2000)
+    catalog_location_url: str = Field(pattern=r"^https://", max_length=2000)
+    metadata_license: Literal["CC-BY"]
+    metadata_attribution: str = Field(min_length=1, max_length=240)
+    metadata_license_url: Literal["https://graph.openaire.eu/docs/apis/terms/"]
+    content_rights_status: Literal["not_assessed"]
+
+
 class SourceOut(BaseModel):
     id: str
     title: str
@@ -2240,6 +2261,7 @@ class SourceOut(BaseModel):
     institutional_publication: InstitutionalPublicationOut | None = None
     official_publication: OfficialPublicationOut | None = None
     official_site_publication: OfficialSitePublicationOut | None = None
+    publication_provenance: CatalogPublicationProvenanceOut | None = None
     source_type: str
     retrieval_status: str
     abstract_excerpt: str | None

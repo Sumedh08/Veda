@@ -332,6 +332,22 @@ export type Source = {
       | 'crossref_doi_title_publisher_and_link_domain_match'
       | 'verified_organization_domain_and_catalog_record_match';
   } | null;
+  publication_provenance?: {
+    schema_version: 1;
+    provider: 'OpenAIRE';
+    verification_status: 'catalog_corroborated';
+    verification_method: 'exact_catalog_title_location_and_publisher_domain_match';
+    catalog_record_id: string;
+    publisher_organization_id: string;
+    organization_identity_status: 'VERIFIED_DOMAIN_SPECIALIST';
+    official_domain: string;
+    discovery_lead_url: string;
+    catalog_location_url: string;
+    metadata_license: 'CC-BY';
+    metadata_attribution: string;
+    metadata_license_url: string;
+    content_rights_status: 'not_assessed';
+  } | null;
   source_type: string;
   statistics?: OfficialStatisticsMetadata | null;
   retrieval_status: string;

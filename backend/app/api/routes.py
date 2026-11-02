@@ -64,6 +64,7 @@ from app.research.workflow import (
 )
 from app.schemas import (
     AdvanceRequest,
+    CatalogPublicationProvenanceOut,
     EventPageOut,
     EvidenceSearchRequest,
     JobCreate,
@@ -325,6 +326,63 @@ def _source_out(source: Source) -> dict[str, Any]:
             ).model_dump(mode="json")
         except (TypeError, ValueError):
             official_site_publication = None
+    publication_provenance = None
+    raw_publication_provenance = (
+        extensions.get("general_web_publication_provenance")
+        if isinstance(extensions, dict)
+        else None
+    )
+    if isinstance(raw_publication_provenance, dict) and isinstance(provider, str):
+        try:
+            validated_provenance = CatalogPublicationProvenanceOut.model_validate(
+                raw_publication_provenance
+            )
+            raw_organization_discovery = extensions.get("organization_discovery")
+            raw_openaire_id = (
+                provider_metadata.get("openaire_id")
+                if isinstance(provider_metadata, dict)
+                else None
+            )
+
+            def normalized_host(value: str) -> str | None:
+                try:
+                    parsed = urlsplit(value)
+                    host = (parsed.hostname or "").casefold().rstrip(".")
+                    if (
+                        parsed.scheme.casefold() != "https"
+                        or parsed.username is not None
+                        or parsed.password is not None
+                        or parsed.port not in {None, 443}
+                    ):
+                        return None
+                except ValueError:
+                    return None
+                return host[4:] if host.startswith("www.") else host
+
+            expected_domain = validated_provenance.official_domain.casefold().rstrip(".")
+            if expected_domain.startswith("www."):
+                expected_domain = expected_domain[4:]
+            lead_domain = normalized_host(validated_provenance.discovery_lead_url)
+            location_domain = normalized_host(validated_provenance.catalog_location_url)
+            verified_organization_match = (
+                isinstance(raw_organization_discovery, dict)
+                and raw_organization_discovery.get("identity_status")
+                == "VERIFIED_DOMAIN_SPECIALIST"
+                and raw_organization_discovery.get("verification_method")
+                == "openaire_catalog_publication_record_and_organization_domain_match"
+                and raw_organization_discovery.get("official_domain") == expected_domain
+            )
+            if (
+                provider.casefold() == "openaire"
+                and raw_openaire_id == validated_provenance.catalog_record_id
+                and source.url == validated_provenance.catalog_location_url
+                and lead_domain == expected_domain
+                and location_domain == expected_domain
+                and verified_organization_match
+            ):
+                publication_provenance = validated_provenance.model_dump(mode="json")
+        except (TypeError, ValueError):
+            publication_provenance = None
     organization_provenance = None
     raw_organization = (
         extensions.get("organization_discovery") if isinstance(extensions, dict) else None
@@ -392,6 +450,26 @@ def _source_out(source: Source) -> dict[str, Any]:
                     )
                     is not None
                 )
+            verification_source_is_openaire = False
+            if isinstance(verification_source, str):
+                try:
+                    parsed_openaire_source = urlsplit(verification_source)
+                    verification_source_is_openaire = bool(
+                        parsed_openaire_source.scheme == "https"
+                        and (parsed_openaire_source.hostname or "").casefold() == "api.openaire.eu"
+                        and parsed_openaire_source.path
+                        in {
+                            "/graph/v3/research-products",
+                            "/graph/v4/research-products",
+                        }
+                        and parsed_openaire_source.username is None
+                        and parsed_openaire_source.password is None
+                        and parsed_openaire_source.port in {None, 443}
+                        and not parsed_openaire_source.query
+                        and not parsed_openaire_source.fragment
+                    )
+                except ValueError:
+                    verification_source_is_openaire = False
             organization_provenance = {
                 "organization_id": organization_id,
                 "organization_name": organization_name,
@@ -400,7 +478,11 @@ def _source_out(source: Source) -> dict[str, Any]:
                 "verification_source": (
                     verification_source[:1000]
                     if isinstance(verification_source, str)
-                    and (verification_source_is_ror or verification_source_is_crossref)
+                    and (
+                        verification_source_is_ror
+                        or verification_source_is_crossref
+                        or verification_source_is_openaire
+                    )
                     else None
                 ),
                 "openalex_institution_id": (
@@ -423,6 +505,7 @@ def _source_out(source: Source) -> dict[str, Any]:
                 "crossref_doi_title_publisher_and_link_domain_match",
                 "verified_organization_domain_and_catalog_record_match",
                 "official_page_metadata_verified",
+                "openaire_catalog_publication_and_domain_match",
             }:
                 organization_provenance["publisher_verification"] = publisher_verification
             publication_provider = raw_organization.get("publication_discovery_provider")
@@ -430,6 +513,7 @@ def _source_out(source: Source) -> dict[str, Any]:
                 "Crawl4AI Cloud site search plus Crossref DOI resolution",
                 "Crawl4AI Cloud question search plus Crossref publisher record",
                 "Crawl4AI Cloud site search plus bounded official page metadata verification",
+                "OpenAIRE Graph publication and organization records",
             }:
                 organization_provenance["publication_discovery_provider"] = publication_provider
             publication_content_access = raw_organization.get("publication_content_access")
@@ -521,6 +605,7 @@ def _source_out(source: Source) -> dict[str, Any]:
         "institutional_publication": institutional_publication,
         "official_publication": official_publication,
         "official_site_publication": official_site_publication,
+        "publication_provenance": publication_provenance,
         "source_type": source.source_type,
         "retrieval_status": source.retrieval_status,
         "retrieval": retrieval,

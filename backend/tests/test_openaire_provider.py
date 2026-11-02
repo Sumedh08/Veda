@@ -80,8 +80,25 @@ def test_openaire_search_maps_a_real_product_and_its_ror_affiliation_without_fol
             "type": "openaire_affiliation",
         }
     ]
-    assert metadata["metadata_license"] == "CC-BY-4.0"
+    assert metadata["metadata_license"] == "CC-BY"
     assert not any("pdf" in request.url.path.casefold() for request in requests)
+
+
+def test_openaire_preserves_institutional_report_document_type():
+    payload = _response()
+    payload["results"][0]["pids"] = []
+    payload["results"][0]["instances"][0]["type"] = "Technical Report"
+    provider = OpenAIREProvider(
+        httpx.Client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+        )
+    )
+
+    work = provider.search("institutional report topic", limit=1)[0]
+
+    assert work.doi is None
+    assert work.source_type == "institutional_report"
+    assert work.provider_metadata["instance_types"] == ["Technical Report"]
 
 
 def test_openaire_retains_only_explicitly_licensed_repository_instances():
@@ -257,7 +274,25 @@ def test_openaire_rate_limit_is_not_retried():
     provider.close()
     assert error.value.code == "rate_limited"
     assert error.value.retry_after_seconds == 30
+    assert error.value.http_status == 429
     assert len(requests) == 1
+
+
+def test_openaire_rejected_request_preserves_http_status_without_response_body():
+    provider = OpenAIREProvider(
+        httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(400, content=b"private provider details")
+            )
+        )
+    )
+    with pytest.raises(OpenAIREError) as error:
+        provider.search("a bounded publication title", limit=2)
+    provider.close()
+
+    assert error.value.code == "provider_rejected_request"
+    assert error.value.http_status == 400
+    assert "private provider details" not in str(error.value)
 
 
 def test_openaire_redirect_is_rejected_without_following_it():

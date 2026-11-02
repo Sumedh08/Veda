@@ -26,6 +26,7 @@ from app.schemas import versioned_checkpoint
 def prevent_unspecified_official_statistics_requests(monkeypatch):
     class EmptyOpenAIRE:
         def __init__(self, *args, **kwargs):
+            type(self).queries = []
             pass
 
         def search(self, _query, *, limit=8):
@@ -3504,6 +3505,7 @@ def test_model_synthesis_deduplicates_shared_passage_text_before_prompt_budget_c
         "crossref_publisher_link",
         "official_page_metadata",
         "crossref_and_official_page_metadata",
+        "openaire_catalog",
     ],
 )
 def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publication(
@@ -3572,7 +3574,11 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
                 hits = (
                     Crawl4AIWebHit(
                         title=(
-                            "Offshore wind transmission system dynamics in India"
+                            "Offshore wind transmission planning in India engineering report"
+                            if not site_search and verification_path == "openaire_catalog"
+                            else "Offshore wind transmission planning in India engineering report"
+                            if site_search and verification_path == "openaire_catalog"
+                            else "Offshore wind transmission system dynamics in India"
                             if verification_path
                             in {"crossref_publisher_link", "crossref_and_official_page_metadata"}
                             and not site_search
@@ -3584,7 +3590,9 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
                             else "Unseeded Wind Systems Laboratory research report"
                         ),
                         url=(
-                            "https://windlab.example/reports/offshore-wind-transmission.html"
+                            "https://windlab.example/reports/offshore-wind-transmission"
+                            if verification_path == "openaire_catalog"
+                            else "https://windlab.example/reports/offshore-wind-transmission.html"
                             if site_search
                             and verification_path
                             in {"official_page_metadata", "crossref_and_official_page_metadata"}
@@ -3737,10 +3745,9 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
                         },
                     )
                 ][:limit]
-            if (
-                query.startswith("Offshore wind transmission planning in India engineering report")
-                and verification_path != "official_page_metadata"
-            ):
+            if query.startswith(
+                "Offshore wind transmission planning in India engineering report"
+            ) and verification_path not in {"official_page_metadata", "openaire_catalog"}:
                 return [
                     ScholarlyWork(
                         external_id="doi:10.5555/offshore-wind-transmission",
@@ -3797,12 +3804,64 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         def close(self):
             pass
 
+    class FixtureOpenAIRE:
+        queries = []
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def search(self, query, *, limit=8):
+            type(self).queries.append(query)
+            if verification_path != "openaire_catalog" or not query.startswith(
+                "Offshore wind transmission planning in India engineering report"
+            ):
+                return []
+            return [
+                ScholarlyWork(
+                    external_id="openaire:openaire____::report-123",
+                    title="Offshore wind transmission planning in India engineering report",
+                    doi=None,
+                    url="https://windlab.example/reports/offshore-wind-transmission",
+                    authors=[],
+                    published_year=2025,
+                    publisher="Unseeded Wind Systems Laboratory",
+                    abstract_excerpt=(
+                        "A research report evaluates offshore wind transmission planning in India."
+                    ),
+                    query=query,
+                    provider="OpenAIRE",
+                    provider_metadata={
+                        "openaire_id": "openaire____::report-123",
+                        "metadata_license": "CC-BY",
+                        "metadata_attribution": "OpenAIRE Graph; attribution required under CC-BY",
+                        "metadata_license_url": "https://graph.openaire.eu/docs/apis/terms/",
+                        "organization_records": [
+                            {
+                                "openaire_id": "openaire____::org-123",
+                                "display_name": "Unseeded Wind Systems Laboratory",
+                                "website_url": "https://windlab.example/",
+                                "type": "research institute",
+                            }
+                        ],
+                        "instance_types": ["report"],
+                    },
+                    source_type="institutional_report",
+                )
+            ][:limit]
+
+        def search_organizations(self, query, *, limit=8):
+            return []
+
+        def close(self):
+            pass
+
     monkeypatch.setattr(workflow.settings, "crawl4ai_enabled", True)
     monkeypatch.setattr(workflow.settings, "crawl4ai_key", "test-only-crawl-key")
     monkeypatch.setattr(workflow, "Crawl4AICloudSearchProvider", FakeCrawl4AI)
     monkeypatch.setattr(workflow, "RORProvider", FixtureROR)
     monkeypatch.setattr(workflow, "WordPressPublicationSearchProvider", FixtureOfficialSite)
     monkeypatch.setattr(workflow, "CrossrefProvider", EmptyCrossref)
+    monkeypatch.setattr(workflow, "OpenAIREProvider", FixtureOpenAIRE)
 
     project = create_project(client)
     job = create_job(
@@ -3838,12 +3897,14 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         and "transmission" in item["matched_topic_terms"]
         for item in routing
     )
-    expected_search_count = 1 if verification_path == "crossref_publisher_link" else 2
+    expected_search_count = (
+        1 if verification_path in {"crossref_publisher_link", "openaire_catalog"} else 2
+    )
     assert event["data"]["general_web_discovery"]["request_count"] == expected_search_count, (
         json.dumps(event["data"]["general_web_discovery"], indent=2)
     )
     assert len(FakeCrawl4AI.queries) == expected_search_count
-    if verification_path != "crossref_publisher_link":
+    if verification_path not in {"crossref_publisher_link", "openaire_catalog"}:
         assert FakeCrawl4AI.queries[1].startswith("site:windlab.example ")
         assert event["data"]["general_web_discovery"]["searches"][1]["purpose"] == (
             "verified_official_domain_publication_discovery"
@@ -3882,6 +3943,9 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
             item["doi"] == "10.5555/offshore-wind-dynamics" for item in verified_publications
         )
         assert verified_publications[0]["lookup_method"] == "crossref_publisher_link_domain_match"
+    elif verification_path == "openaire_catalog":
+        assert verified_publications == []
+        assert len(event["data"]["general_web_discovery"]["catalog_corroborated_publications"]) == 1
     else:
         assert any(
             item["doi"] == "10.5555/offshore-wind-transmission" for item in verified_publications
@@ -3925,13 +3989,15 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
             is False
         )
     assert FixtureOfficialSite.search_calls == 0
-    assert any(
-        item["provider"] == "Official site publication search"
-        and item["status"] == "not_attempted_verified_publication_already_discovered"
-        and item["request_count"] == 0
-        for item in event["data"]["organization_discovery"]["publication_searches"]
-    )
-    assert all(source["title"] != publication.title for source in sources)
+    if verification_path != "openaire_catalog":
+        assert any(
+            item["provider"] == "Official site publication search"
+            and item["status"] == "not_attempted_verified_publication_already_discovered"
+            and item["request_count"] == 0
+            for item in event["data"]["organization_discovery"]["publication_searches"]
+        )
+    if verification_path != "openaire_catalog":
+        assert all(source["title"] != publication.title for source in sources)
     if verification_path in {"official_page_metadata", "crossref_and_official_page_metadata"}:
         verified_source = next(
             source
@@ -4001,6 +4067,57 @@ def test_general_web_discovery_verifies_unknown_domain_and_selects_official_publ
         assert verified_source["organization_provenance"]["publisher_linked_domain"] == (
             "windlab.example"
         )
+    elif verification_path == "openaire_catalog":
+        catalog_publication = event["data"]["general_web_discovery"][
+            "catalog_corroborated_publications"
+        ][0]
+        assert catalog_publication["catalog_record_id"] == "openaire____::report-123"
+        assert catalog_publication["publisher_verification"] == (
+            "openaire_catalog_publication_and_domain_match"
+        )
+        assert catalog_publication["organization_identity_status"] == ("VERIFIED_DOMAIN_SPECIALIST")
+        domain_check = next(
+            item
+            for item in event["data"]["general_web_discovery"]["domain_verifications"]
+            if item["domain"] == "windlab.example"
+        )
+        assert domain_check["ror_outcome"] == "not_found"
+        assert domain_check["status"] == "openaire_catalog_corroborated"
+        verified_source = next(source for source in sources if source["provider"] == "OpenAIRE")
+        assert verified_source["source_type"] == "institutional_report"
+        assert verified_source["doi"] is None
+        assert verified_source["organization_provenance"]["verification_method"] == (
+            "openaire_catalog_publication_record_and_organization_domain_match"
+        )
+        assert verified_source["publication_provenance"]["catalog_record_id"] == (
+            "openaire____::report-123"
+        )
+        assert verified_source["organization_provenance"]["verification_source"] == (
+            "https://api.openaire.eu/graph/v4/research-products"
+        )
+        assert verified_source["retrieval_status"] == "metadata_only"
+        final = run_all_steps(client, job["id"])
+        assert final["status"] == "completed_with_limitations"
+        report = client.get(f"/api/v1/research-jobs/{job['id']}/report").json()
+        inspection = client.get(f"/api/v1/reports/{report['id']}/inspection").json()
+        report_source = next(
+            item for item in inspection["sources"] if item["id"] == verified_source["id"]
+        )
+        assert report_source["publication_provenance"]["catalog_record_id"] == (
+            "openaire____::report-123"
+        )
+        assert report_source["passages"] == []
+        assert any(
+            citation.get("source_id") == verified_source["id"]
+            for citation in report["citation_map"].values()
+        )
+        reconciled = report["verification"]["search_coverage"]["general_web_discovery"][
+            "catalog_corroborated_publications"
+        ][0]
+        assert reconciled["selected"] is True
+        assert reconciled["source_id"] == verified_source["id"]
+        assert reconciled["retrieval_status"] == "metadata_only"
+        assert reconciled["passage_count"] == 0
     else:
         verified_source = next(
             source for source in sources if source["doi"] == "10.5555/offshore-wind-transmission"

@@ -479,6 +479,7 @@ async function installApiFixtures(
     omitAdaptiveRequirementEvidence?: boolean;
     openAlexContentAvailability?: { pdf?: boolean; grobid_xml?: boolean };
     crossrefVerifiedPublisher?: boolean;
+    openaireCatalogPublication?: boolean;
     privateResearchRights?: boolean;
     providerStatus?: { active_provider: string; provider_ready: boolean; model: string | null; paid_calls_allowed: boolean };
   } = {},
@@ -717,13 +718,36 @@ async function installApiFixtures(
         },
       }
     : activeSourceBase;
-  const sourceWithAvailability = options.openAlexContentAvailability
+  const sourceWithPublicationProvenance = options.openaireCatalogPublication
     ? {
         ...sourceWithOrganization,
+        provider: 'OpenAIRE',
+        source_type: 'institutional_report',
+        publication_provenance: {
+          schema_version: 1,
+          provider: 'OpenAIRE',
+          verification_status: 'catalog_corroborated',
+          verification_method: 'exact_catalog_title_location_and_publisher_domain_match',
+          catalog_record_id: 'openaire____::report-fixture',
+          publisher_organization_id: 'openaire____::org-fixture',
+          organization_identity_status: 'VERIFIED_DOMAIN_SPECIALIST',
+          official_domain: 'example.org',
+          discovery_lead_url: 'https://example.org/reports/urban-heat-adaptation',
+          catalog_location_url: 'https://example.org/reports/urban-heat-adaptation',
+          metadata_license: 'CC-BY',
+          metadata_attribution: 'OpenAIRE Graph; attribution required under CC-BY',
+          metadata_license_url: 'https://graph.openaire.eu/docs/apis/terms/',
+          content_rights_status: 'not_assessed',
+        },
+      }
+    : sourceWithOrganization;
+  const sourceWithAvailability = options.openAlexContentAvailability
+    ? {
+        ...sourceWithPublicationProvenance,
         provider: 'OpenAlex',
         openalex_fulltext_availability: options.openAlexContentAvailability,
       }
-    : sourceWithOrganization;
+    : sourceWithPublicationProvenance;
   const activeSource = options.privateResearchRights
     ? {
         ...sourceWithAvailability,
@@ -1216,6 +1240,20 @@ test('source inspector preserves Crossref identity evidence without labeling it 
   );
   await expect(inspector.getByText(/Identity evidence supports the listed organization\/domain or publisher-publication relationship only/)).toBeVisible();
   await expect(inspector.getByText('Publication rights', { exact: true })).toBeVisible();
+});
+
+test('source inspector separates OpenAIRE catalog corroboration from content rights', async ({ page }) => {
+  await openReport(page, { openaireCatalogPublication: true });
+  await page.getByRole('button', { name: 'Open source S1' }).click();
+  const inspector = page.getByRole('dialog', { name: source.title });
+  await expect(inspector).toBeVisible();
+  await expect(inspector.getByRole('heading', { name: 'Publication catalog corroboration' })).toBeVisible();
+  await expect(inspector).toContainText('catalog corroborated');
+  await expect(inspector).toContainText('openaire____::report-fixture');
+  await expect(inspector).toContainText('OpenAIRE Graph; attribution required under CC-BY');
+  await expect(inspector).toContainText('Document rights');
+  await expect(inspector).toContainText('not assessed');
+  await expect(inspector).toContainText('does not establish the organization\'s general authority');
 });
 
 test('source inspector separates private research analysis from sharing rights', async ({ page }) => {

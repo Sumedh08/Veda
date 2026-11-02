@@ -34,11 +34,13 @@ class OpenAIREError(Exception):
         code: str,
         retry_after_seconds: float | None = None,
         request_dispatched: bool = False,
+        http_status: int | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.retry_after_seconds = retry_after_seconds
         self.request_dispatched = request_dispatched
+        self.http_status = http_status
 
 
 def _organization_result(item: Any) -> dict[str, str | None] | None:
@@ -386,6 +388,25 @@ def _work_from_result(item: dict[str, Any], *, query: str) -> ScholarlyWork | No
         if isinstance(item.get("subjects"), list)
         else []
     )
+    normalized_instance_types = {
+        " ".join(re.findall(r"[a-z0-9]+", value.casefold())) for value in instance_types
+    }
+    source_type = (
+        "institutional_report"
+        if normalized_instance_types.intersection(
+            {
+                "report",
+                "research report",
+                "technical report",
+                "policy report",
+                "policy brief",
+                "working paper",
+                "policy paper",
+                "project deliverable",
+            }
+        )
+        else "scholarly_article"
+    )
     return ScholarlyWork(
         external_id=external_id,
         title=title,
@@ -399,7 +420,7 @@ def _work_from_result(item: dict[str, Any], *, query: str) -> ScholarlyWork | No
         provider="OpenAIRE",
         provider_metadata={
             "openaire_id": product_id,
-            "metadata_license": "CC-BY-4.0",
+            "metadata_license": "CC-BY",
             "metadata_attribution": "OpenAIRE Graph; attribution required under CC-BY",
             "metadata_license_url": OPENAIRE_LICENSE_URL,
             "organization_records": organization_records,
@@ -410,6 +431,7 @@ def _work_from_result(item: dict[str, Any], *, query: str) -> ScholarlyWork | No
             "repository_instances": repository_instances,
             "subjects": list(dict.fromkeys(subjects))[:32],
         },
+        source_type=source_type,
     )
 
 
@@ -493,6 +515,7 @@ class OpenAIREProvider:
                         "OpenAIRE redirect was rejected",
                         code="redirect_rejected",
                         request_dispatched=True,
+                        http_status=response.status_code,
                     )
                 if response.status_code == 429:
                     raw_retry = response.headers.get("Retry-After")
@@ -502,6 +525,7 @@ class OpenAIREProvider:
                         code="rate_limited",
                         retry_after_seconds=retry_after,
                         request_dispatched=True,
+                        http_status=response.status_code,
                     )
                 if response.status_code >= 400:
                     raise OpenAIREError(
@@ -510,6 +534,7 @@ class OpenAIREProvider:
                         if response.status_code >= 500
                         else "provider_rejected_request",
                         request_dispatched=True,
+                        http_status=response.status_code,
                     )
                 body = bytearray()
                 for chunk in response.iter_bytes():
@@ -667,6 +692,7 @@ class OpenAIREProvider:
                         "OpenAIRE redirect was rejected",
                         code="redirect_rejected",
                         request_dispatched=True,
+                        http_status=response.status_code,
                     )
                 if response.status_code == 429:
                     raw_retry = response.headers.get("Retry-After")
@@ -676,6 +702,7 @@ class OpenAIREProvider:
                         code="rate_limited",
                         retry_after_seconds=retry_after,
                         request_dispatched=True,
+                        http_status=response.status_code,
                     )
                 if response.status_code >= 400:
                     raise OpenAIREError(
@@ -684,6 +711,7 @@ class OpenAIREProvider:
                         if response.status_code >= 500
                         else "provider_rejected_request",
                         request_dispatched=True,
+                        http_status=response.status_code,
                     )
                 body = bytearray()
                 for chunk in response.iter_bytes():

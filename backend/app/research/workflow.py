@@ -149,6 +149,9 @@ from app.research.provider_cooldowns import (
     active_provider_cooldown_seconds,
     record_provider_account_cooldown,
 )
+from app.research.publication_provenance import (
+    corroborate_openaire_publication_lead,
+)
 from app.research.quotas import (
     ModelCallQuotaExceeded,
     daily_model_call_blocker,
@@ -3224,6 +3227,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                 "domain_verifications": [],
                 "newly_discovered_organizations": [],
                 "verified_official_publications": [],
+                "catalog_corroborated_publications": [],
                 "publication_verification_attempts": [],
                 "official_publication_search": {"status": "not_attempted"},
                 "official_domain_publication_search": {"status": "not_attempted"},
@@ -3241,10 +3245,11 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                 },
                 "interpretation_limit": (
                     "Search results and snippets are unverified discovery leads, never source "
-                    "passages or findings. A candidate publisher domain is verified by an exact "
-                    "ROR domain record or, for DOI publications, a Crossref publisher/title record "
-                    "whose full-text link names the same domain. Identity and domain linkage do not "
-                    "establish organization-wide authority, methods, quality, truth, or reuse rights; "
+                    "passages or findings. Candidate organization/domain evidence can come from an "
+                    "exact ROR record, a Crossref DOI publisher/link match, or an item-scoped OpenAIRE "
+                    "work and linked organization record with matching title and domain. Each path "
+                    "establishes only the stated identity or publication linkage, not organization-wide "
+                    "authority, methods, quality, truth, or reuse rights; "
                     "official-site records remain metadata-only until the existing rights and content "
                     "acquisition workflow succeeds."
                 ),
@@ -3418,6 +3423,7 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                         for domain in candidate_domains:
                             if len(dynamic_web_organizations) >= 2:
                                 break
+                            ror_lookup_outcome = "not_attempted"
                             try:
                                 organization_discovery["domain_identity_requests_attempted"] += 1
                                 provider_query_counts.setdefault(
@@ -3426,9 +3432,11 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                 provider_query_counts["ROR exact-domain identity resolution"] += 1
                                 provider_queries_attempted += 1
                                 ror_id = ror_provider.search_exact_domain(domain)
+                                ror_lookup_outcome = "not_found" if not ror_id else "record_found"
                                 verification = {
                                     "domain": domain,
                                     "status": "not_found" if not ror_id else "verification_pending",
+                                    "ror_outcome": ror_lookup_outcome,
                                     "ror_id": ror_id,
                                 }
                                 if not ror_id:
@@ -3953,6 +3961,16 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                                     {
                                         "domain": domain,
                                         "status": "verification_failed",
+                                        "ror_outcome": (
+                                            ror_lookup_outcome
+                                            if ror_lookup_outcome != "not_attempted"
+                                            else "lookup_failed"
+                                        ),
+                                        "organization_profile_outcome": (
+                                            "failed"
+                                            if ror_lookup_outcome == "record_found"
+                                            else "not_attempted"
+                                        ),
                                         "error_code": getattr(exc, "code", "provider_query_failed"),
                                     }
                                 )
@@ -4944,18 +4962,47 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                         source_governance_plan.get("planned_classes", [])
                     )
                 )
+                ror_missed_domains = {
+                    item.get("domain")
+                    for item in general_web_discovery.get("domain_verifications", [])
+                    if isinstance(item, dict) and item.get("status") == "not_found"
+                }
+                openaire_catalog_lead = next(
+                    (
+                        hit
+                        for candidate in general_web_discovery.get("domain_candidate_routing", [])
+                        if isinstance(candidate, dict)
+                        and candidate.get("status") == "eligible_for_identity_verification"
+                        and candidate.get("domain") in ror_missed_domains
+                        for hit in general_web_discovery.get("hits", [])
+                        if isinstance(hit, dict)
+                        and hit.get("domain") == candidate.get("domain")
+                        and hit.get("url") == candidate.get("url")
+                        and isinstance(hit.get("title"), str)
+                        and hit["title"].strip()
+                    ),
+                    None,
+                )
                 # Organization records need not contain every term in the full
                 # question. Use bounded documented OR syntax for that endpoint;
                 # ordinary publication search retains the compact keyword query.
+                # When general web has already surfaced a relevant publication
+                # lead on an ROR-missed domain, spend the existing single
+                # OpenAIRE request on that title for item-level corroboration.
+                # This replaces, rather than adds to, the normal OpenAIRE query.
                 openaire_query = (
-                    openaire_organization_discovery_query(job_snapshot["question"])
+                    str(openaire_catalog_lead["title"])[:500]
+                    if openaire_catalog_lead is not None
+                    else openaire_organization_discovery_query(job_snapshot["question"])
                     if specialist_discovery_planned
                     else compact_bibliographic_query(
                         [job_snapshot["question"]], max_terms=8, max_chars=180
                     )
                 )
                 organization_discovery["openaire_search"]["mode"] = (
-                    "topic_organization_discovery"
+                    "web_lead_publication_verification"
+                    if openaire_catalog_lead is not None
+                    else "topic_organization_discovery"
                     if specialist_discovery_planned
                     else "publication_search"
                 )
@@ -4964,7 +5011,9 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                 openaire_wait_budget_seconds = 3.0
                 provider_queries_attempted += 1
                 provider_name = (
-                    "OpenAIRE organization discovery"
+                    "OpenAIRE publication verification"
+                    if openaire_catalog_lead is not None
+                    else "OpenAIRE organization discovery"
                     if specialist_discovery_planned
                     else "OpenAIRE"
                 )
@@ -4999,7 +5048,207 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
 
                 openaire = OpenAIREProvider(before_request=admit_openaire_request)
                 try:
-                    if specialist_discovery_planned:
+                    if openaire_catalog_lead is not None:
+                        catalog_works = openaire.search(openaire_query, limit=8)
+                        organization_discovery["openaire_search"].update(
+                            {
+                                "status": "completed",
+                                "returned_count": len(catalog_works),
+                                "publication_ids": [record.external_id for record in catalog_works],
+                                "request_dispatched": True,
+                            }
+                        )
+                        provider_counts[provider_name] += len(catalog_works)
+                        candidate_domain = str(openaire_catalog_lead.get("domain") or "")
+                        verified_match = None
+                        for catalog_work in catalog_works:
+                            match = corroborate_openaire_publication_lead(
+                                catalog_work, openaire_catalog_lead
+                            )
+                            attempt = {
+                                "doi": catalog_work.doi,
+                                "official_url": catalog_work.url,
+                                "search_title": openaire_catalog_lead.get("title"),
+                                "catalog_title": catalog_work.title,
+                                "lookup_method": "openaire_web_lead_title_search",
+                                "catalog_record_id": catalog_work.provider_metadata.get(
+                                    "openaire_id"
+                                ),
+                                "status": (
+                                    "verified"
+                                    if match.status == "corroborated"
+                                    else match.reason_code
+                                ),
+                            }
+                            general_web_discovery["publication_verification_attempts"].append(
+                                attempt
+                            )
+                            if match.status == "corroborated":
+                                verified_match = (catalog_work, match)
+                                break
+
+                        if verified_match is not None:
+                            catalog_work, match = verified_match
+                            linked_organization = match.organization or {}
+                            organization_id = f"openaire:{linked_organization['openaire_id']}"
+                            organization = {
+                                "schema_version": 1,
+                                "organization_id": organization_id,
+                                "openalex_ids": [],
+                                "openaire_ids": [linked_organization["openaire_id"]],
+                                "canonical_name": linked_organization["display_name"],
+                                "aliases": [],
+                                "organization_types": [
+                                    linked_organization.get("type") or "research organization"
+                                ],
+                                "official_domains": [match.official_domain],
+                                "official_urls": [linked_organization["website_url"]],
+                                "country_code": linked_organization.get("country_code"),
+                                "identity_status": "VERIFIED_DOMAIN_SPECIALIST",
+                                "verification_method": (
+                                    "openaire_catalog_publication_record_and_organization_domain_match"
+                                ),
+                                "verification_source": (
+                                    "https://api.openaire.eu/graph/v4/research-products"
+                                ),
+                                "verification_timestamp": utcnow().isoformat(),
+                                "registry_match": False,
+                                "quality_assessment": "not_assessed",
+                                "related_publications": [
+                                    {
+                                        "canonical_identity": canonical_work_identity(catalog_work),
+                                        "title": catalog_work.title,
+                                    }
+                                ],
+                                "limitations": [
+                                    "OpenAIRE links this publication record and organization record to the same domain. This is item-scoped identity/domain corroboration only; research quality, organization-wide authority, content rights, and other publications remain separately unassessed."
+                                ],
+                            }
+                            dynamic_web_organizations.append(organization)
+                            organization_discovery["organizations"].append(organization)
+                            general_web_discovery["newly_discovered_organizations"].append(
+                                {
+                                    "organization_id": organization_id,
+                                    "canonical_name": organization["canonical_name"],
+                                    "official_domain": match.official_domain,
+                                    "identity_status": organization["identity_status"],
+                                    "registry_match": False,
+                                    "verification_source": organization["verification_source"],
+                                    "verification_method": organization["verification_method"],
+                                }
+                            )
+                            publication_provenance = {
+                                "schema_version": 1,
+                                "provider": "OpenAIRE",
+                                "verification_status": "catalog_corroborated",
+                                "verification_method": (
+                                    "exact_catalog_title_location_and_publisher_domain_match"
+                                ),
+                                "catalog_record_id": match.catalog_record_id,
+                                "publisher_organization_id": linked_organization["openaire_id"],
+                                "organization_identity_status": "VERIFIED_DOMAIN_SPECIALIST",
+                                "official_domain": match.official_domain,
+                                "discovery_lead_url": openaire_catalog_lead["url"],
+                                "catalog_location_url": catalog_work.url,
+                                "metadata_license": "CC-BY",
+                                "metadata_attribution": "OpenAIRE Graph; attribution required under CC-BY",
+                                "metadata_license_url": "https://graph.openaire.eu/docs/apis/terms/",
+                                "content_rights_status": "not_assessed",
+                            }
+                            metadata = dict(catalog_work.provider_metadata)
+                            metadata["organization_discovery"] = {
+                                "organization_id": organization_id,
+                                "organization_name": organization["canonical_name"],
+                                "identity_status": organization["identity_status"],
+                                "verification_method": organization["verification_method"],
+                                "verification_source": organization["verification_source"],
+                                "official_domain": match.official_domain,
+                                "official_publication_url": catalog_work.url,
+                                "publisher_verification": (
+                                    "openaire_catalog_publication_and_domain_match"
+                                ),
+                                "publication_discovery_provider": (
+                                    "OpenAIRE Graph publication and organization records"
+                                ),
+                                "quality_assessment": "not_assessed",
+                                "publication_content_access": "not_retrieved",
+                                "publication_rights_status": "not_assessed_metadata_only",
+                            }
+                            metadata["general_web_publication_provenance"] = publication_provenance
+                            verified_work = replace(
+                                catalog_work,
+                                provider_metadata=versioned_provider_metadata(
+                                    catalog_work.provider, metadata
+                                ),
+                            )
+                            observed_records.append((verified_work, utcnow()))
+                            publication = {
+                                "doi": catalog_work.doi,
+                                "title": catalog_work.title,
+                                "publisher": catalog_work.publisher,
+                                "official_url": catalog_work.url,
+                                "source_provider": "OpenAIRE",
+                                "lookup_method": "openaire_web_lead_title_search",
+                                "publisher_verification": (
+                                    "openaire_catalog_publication_and_domain_match"
+                                ),
+                                "catalog_record_id": match.catalog_record_id,
+                                "organization_id": organization_id,
+                                "organization_identity_status": organization["identity_status"],
+                                "content_fetched": False,
+                                "rights_status": "not_assessed",
+                            }
+                            general_web_discovery["catalog_corroborated_publications"].append(
+                                publication
+                            )
+                            for verification in general_web_discovery["domain_verifications"]:
+                                if verification.get("domain") == candidate_domain:
+                                    verification.update(
+                                        {
+                                            "status": "openaire_catalog_corroborated",
+                                            "identity_status": organization["identity_status"],
+                                            "organization_id": organization_id,
+                                            "canonical_name": organization["canonical_name"],
+                                            "verification_method": organization[
+                                                "verification_method"
+                                            ],
+                                            "verification_source": organization[
+                                                "verification_source"
+                                            ],
+                                            "publication_record_id": match.catalog_record_id,
+                                            "publication_title": catalog_work.title,
+                                        }
+                                    )
+                                    break
+                            for hit in general_web_discovery["hits"]:
+                                if hit.get("url") == openaire_catalog_lead.get("url"):
+                                    hit["organization_id"] = organization_id
+                                    hit["candidate_status"] = (
+                                        "openaire_catalog_publication_and_domain_corroborated"
+                                    )
+                                    break
+                        else:
+                            general_web_discovery["publication_verification_attempts"].append(
+                                {
+                                    "doi": None,
+                                    "official_url": openaire_catalog_lead.get("url"),
+                                    "search_title": openaire_catalog_lead.get("title"),
+                                    "lookup_method": "openaire_web_lead_title_search",
+                                    "candidate_count": len(catalog_works),
+                                    "status": "no_catalog_title_location_and_organization_match",
+                                }
+                            )
+                        # OpenAIRE is the same bounded discovery request used by
+                        # the normal workflow; retain other catalog works as
+                        # ordinary candidates, never as web-verified items.
+                        for catalog_work in catalog_works:
+                            if (
+                                verified_match
+                                and catalog_work.external_id == verified_match[0].external_id
+                            ):
+                                continue
+                            observed_records.append((catalog_work, utcnow()))
+                    elif specialist_discovery_planned:
                         organization_results = openaire.search_organizations(
                             openaire_query, limit=8
                         )
@@ -5463,17 +5712,40 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                         "origin_limiter_unavailable",
                     }
                     if not deferred:
-                        provider_failures["OpenAIRE"] += 1
+                        provider_failures.setdefault(provider_name, 0)
+                        provider_failures[provider_name] += 1
                     organization_discovery["openaire_search"].update(
                         {
                             "status": "deferred" if deferred else "failed",
                             "error_code": exc.code,
+                            "http_status": exc.http_status,
                             "request_dispatched": exc.request_dispatched,
                             "retry_after_seconds": exc.retry_after_seconds,
                         }
                     )
+                    if openaire_catalog_lead is not None:
+                        general_web_discovery["publication_verification_attempts"].append(
+                            {
+                                "doi": None,
+                                "official_url": openaire_catalog_lead.get("url"),
+                                "search_title": openaire_catalog_lead.get("title"),
+                                "lookup_method": "openaire_web_lead_title_search",
+                                "status": "deferred" if deferred else "provider_failed",
+                                "error_code": exc.code,
+                                "http_status": exc.http_status,
+                                "request_dispatched": exc.request_dispatched,
+                            }
+                        )
+                        for verification in general_web_discovery["domain_verifications"]:
+                            if verification.get("domain") == openaire_catalog_lead.get("domain"):
+                                verification["publication_verification_status"] = (
+                                    "deferred" if deferred else "provider_failed"
+                                )
+                                verification["publication_verification_error_code"] = exc.code
+                                break
                 except Exception:
-                    provider_failures["OpenAIRE"] += 1
+                    provider_failures.setdefault(provider_name, 0)
+                    provider_failures[provider_name] += 1
                     organization_discovery["openaire_search"].update(
                         {
                             "status": "failed",
@@ -5481,6 +5753,18 @@ def _execute_stage(db: Session, job_snapshot: dict[str, Any]) -> StageResult:
                             "request_dispatched": True,
                         }
                     )
+                    if openaire_catalog_lead is not None:
+                        general_web_discovery["publication_verification_attempts"].append(
+                            {
+                                "doi": None,
+                                "official_url": openaire_catalog_lead.get("url"),
+                                "search_title": openaire_catalog_lead.get("title"),
+                                "lookup_method": "openaire_web_lead_title_search",
+                                "status": "provider_failed",
+                                "error_code": "provider_query_failed",
+                                "request_dispatched": True,
+                            }
+                        )
                 finally:
                     openaire.close()
                     provider_query_latencies_ms[provider_name].append(
@@ -13181,8 +13465,13 @@ def _report_search_coverage(
     # result with the source ledger at report time so access status reflects the
     # actual extraction outcome rather than the discovery-time default.
     if general_web_discovery is not None:
-        verified_publications = general_web_discovery.get("verified_official_publications")
-        if isinstance(verified_publications, list):
+        publication_groups = (
+            general_web_discovery.get("verified_official_publications"),
+            general_web_discovery.get("catalog_corroborated_publications"),
+        )
+        for verified_publications in publication_groups:
+            if not isinstance(verified_publications, list):
+                continue
             for publication in verified_publications:
                 if not isinstance(publication, dict):
                     continue
@@ -13526,6 +13815,23 @@ def _report_search_coverage(
                     f"read-only preflight checks: {publication.get('content_preflight_request_count') if publication.get('content_preflight_request_count') is not None else 'not recorded'}; "
                     f"provider-reported credits: {publication.get('content_reported_cost_credits') if publication.get('content_reported_cost_credits') is not None else 'unknown'}; "
                     f"unresolved reserved credits: {publication.get('content_unresolved_reserved_credits') if publication.get('content_unresolved_reserved_credits') is not None else 'not recorded'}."
+                )
+        catalog_publications = general_web_discovery.get("catalog_corroborated_publications", [])
+        if isinstance(catalog_publications, list):
+            for publication in catalog_publications:
+                if not isinstance(publication, dict):
+                    continue
+                lines.append(
+                    "- OpenAIRE catalog-corroborated publication relationship: "
+                    f"{html.escape(str(publication.get('title') or 'Title unavailable'))}; "
+                    f"publisher: {html.escape(str(publication.get('publisher') or 'not recorded'))}; "
+                    f"catalog record: {html.escape(str(publication.get('catalog_record_id') or 'not recorded'))}; "
+                    f"publication link: {html.escape(str(publication.get('official_url') or 'not recorded'), quote=True)}; "
+                    f"organization identity status: {html.escape(str(publication.get('organization_identity_status') or 'unresolved'))}; "
+                    f"selected: {bool(publication.get('selected', False))}; "
+                    f"access: {html.escape(str(publication.get('retrieval_status') or 'metadata_only'))}; "
+                    f"passages: {int(publication.get('passage_count', 0))}; "
+                    f"rights: {html.escape(str(publication.get('rights_status') or 'not assessed'))}."
                 )
         lines.append(
             f"- Organization-attributed publications selected into Veda's source ledger: "

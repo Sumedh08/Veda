@@ -7,6 +7,28 @@ from app.api.routes import _source_out
 from app.providers.metadata import versioned_provider_metadata
 
 
+def test_openaire_metadata_accepts_catalog_ids_with_dot_separators():
+    metadata = versioned_provider_metadata(
+        "OpenAIRE",
+        {
+            "openaire_id": "openaire____::report.v1",
+            "metadata_license": "CC-BY",
+            "metadata_attribution": "OpenAIRE Graph",
+            "metadata_license_url": "https://graph.openaire.eu/docs/apis/terms/",
+            "organization_records": [
+                {
+                    "openaire_id": "openaire____::organization.v1",
+                    "display_name": "A Specialist Institute",
+                    "website_url": "https://example.org",
+                }
+            ],
+        },
+    )
+
+    assert metadata["openaire_id"] == "openaire____::report.v1"
+    assert metadata["organization_records"][0]["openaire_id"] == ("openaire____::organization.v1")
+
+
 @pytest.mark.parametrize(
     ("provider", "metadata", "preserved"),
     [

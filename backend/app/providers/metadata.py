@@ -98,7 +98,7 @@ class OpenAlexInstitutionMetadataV1(_NestedMetadata):
 
 
 class OpenAIREOrganizationMetadataV1(_NestedMetadata):
-    openaire_id: str = Field(pattern=r"^[A-Za-z0-9_:\-]{1,300}$")
+    openaire_id: str = Field(pattern=r"^[A-Za-z0-9_:.\-]{1,300}$")
     ror_id: str | None = Field(default=None, pattern=r"^https://ror\.org/[0-9a-z]{9}$")
     display_name: str = Field(min_length=1, max_length=300)
     website_url: str | None = Field(default=None, max_length=1000)
@@ -143,8 +143,8 @@ class OpenAlexMetadataV1(_ProviderMetadataV1):
 
 
 class OpenAIREMetadataV1(_ProviderMetadataV1):
-    openaire_id: str = Field(pattern=r"^[A-Za-z0-9_:\-]{1,300}$")
-    metadata_license: Literal["CC-BY-4.0"]
+    openaire_id: str = Field(pattern=r"^[A-Za-z0-9_:.\-]{1,300}$")
+    metadata_license: Literal["CC-BY"]
     metadata_attribution: str = Field(min_length=1, max_length=240)
     metadata_license_url: str = Field(min_length=8, max_length=1000)
     organization_records: list[OpenAIREOrganizationMetadataV1] = Field(

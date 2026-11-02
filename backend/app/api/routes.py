@@ -148,6 +148,9 @@ def _job_out(job: ResearchJob) -> dict[str, Any]:
         "question": job.question,
         "scope": versioned_scope(job.scope_json),
         "depth": job.depth,
+        "ai_assisted_relevance": bool(
+            _checkpoint_for_job(job).get("extensions", {}).get("ai_assisted_relevance") is True
+        ),
         "model_provider": job.model_provider,
         "model_name": job.model_name,
         "budget_ceiling_usd": job.budget_ceiling_usd,
@@ -626,6 +629,9 @@ def _source_out(source: Source) -> dict[str, Any]:
 
 def _candidate_out(candidate: DiscoveryCandidate) -> dict[str, Any]:
     relevance = candidate_relevance_for_api(candidate.relevance_json)
+    planned_alignment = (
+        relevance.get("planned_query_alignment") if isinstance(relevance, dict) else None
+    )
     abstract_excerpt, retention_status = normalize_candidate_abstract_snapshot(
         abstract_excerpt=candidate.abstract_excerpt,
         retention_status=candidate.abstract_excerpt_retention_status,
@@ -655,7 +661,7 @@ def _candidate_out(candidate: DiscoveryCandidate) -> dict[str, Any]:
         "ranking_order": candidate.ranking_order,
         "relevance_score": relevance.get("score") if relevance else None,
         "planned_query_score": (
-            relevance.get("planned_query_alignment", {}).get("score") if relevance else None
+            planned_alignment.get("score") if isinstance(planned_alignment, dict) else None
         ),
         "selection_score": relevance.get("selection_score") if relevance else None,
         "relevance": relevance,
@@ -2104,6 +2110,7 @@ def create_job(
         "schema_version": 1,
         "workflow_version": 1,
         "depth_profile": depth_profile(payload.depth).as_dict(),
+        "extensions": {"ai_assisted_relevance": payload.ai_assisted_relevance},
     }
     if follow_up_context:
         checkpoint["follow_up_context"] = follow_up_context

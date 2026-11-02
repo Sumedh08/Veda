@@ -238,6 +238,25 @@ class ResearchPlanSelectionDraftV1(BaseModel):
         return value
 
 
+class CandidateRelevanceAssessmentItemV1(BaseModel):
+    """Model output is restricted to fixed candidate keys and relevance labels."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    candidate_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    assessment: Literal[
+        "directly_relevant", "potentially_relevant", "background", "unrelated", "uncertain"
+    ]
+    reason: str = Field(min_length=1, max_length=240)
+
+
+class CandidateRelevanceReviewV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal[1]
+    assessments: list[CandidateRelevanceAssessmentItemV1] = Field(max_length=12)
+
+
 class SemanticSupportAssessment(BaseModel):
     model_config = ConfigDict(extra="forbid")
     item_id: str = Field(min_length=1, max_length=16)

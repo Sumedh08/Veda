@@ -1317,7 +1317,8 @@ test('source library exposes candidate exclusions and abstract-text rights omiss
   await expect(page.getByText('QUERY SCORE 0.72')).toBeVisible();
   await expect(page.getByText('RANK SCORE 0.85')).toBeVisible();
   await expect(page.getByText(/retrieval relevance only; not source quality/i)).toBeVisible();
-  await expect(page.getByText(/source-cap order uses the higher of two auditable lexical-overlap scores/i)).toBeVisible();
+  await expect(page.getByText(/deterministic lexical scores remain visible as the baseline/i)).toBeVisible();
+  await expect(page.getByText(/a bounded model review may promote a directly relevant bibliographic record past a lexical topic-gate miss/i)).toBeVisible();
   const viewport = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
   expect(viewport.scroll).toBeLessThanOrEqual(viewport.client + 1);
 });
@@ -1852,6 +1853,38 @@ test('research composer does not describe an unready model provider as enabled f
   await expect(disclosure).toContainText('The selected provider is not ready.');
   await expect(disclosure).toContainText('this server will not send a model request');
   await expect(disclosure).not.toContainText('The server may send your question');
+});
+
+test('AI relevance review is off by default and persisted only after explicit opt-in', async ({ page }) => {
+  await openJob(page, {
+    providerStatus: {
+      active_provider: 'openrouter',
+      provider_ready: true,
+      model: 'openrouter/free',
+      paid_calls_allowed: false,
+    },
+  });
+  await page.locator('.job-view').getByRole('button', { name: project.title }).click();
+  await page.getByRole('button', { name: 'Start research' }).click();
+  const composer = page.getByRole('dialog', { name: 'Shape your research question' });
+  const optIn = composer.getByRole('checkbox', { name: /Use AI-assisted source relevance review/ });
+  await expect(optIn).toBeEnabled();
+  await expect(optIn).not.toBeChecked();
+
+  let submittedPayload: Record<string, unknown> | undefined;
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === `/api/v1/projects/${project.id}/research-jobs`
+    ) {
+      submittedPayload = request.postDataJSON() as Record<string, unknown>;
+    }
+  });
+  await composer.getByLabel('Research question').fill('Does a bounded evidence review recover relevant literature?');
+  await optIn.check();
+  await composer.getByRole('button', { name: 'Start research' }).click();
+  await expect(page.getByRole('heading', { name: 'Does a bounded evidence review recover relevant literature?' })).toBeVisible();
+  expect(submittedPayload?.ai_assisted_relevance).toBe(true);
 });
 
 test('claim and source evidence inspectors pass axe and stay within a narrow viewport', async ({ page }) => {

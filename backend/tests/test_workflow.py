@@ -885,6 +885,115 @@ def test_discovery_candidate_ledger_marks_source_cap_exclusion(client, monkeypat
     assert result.candidates[0].relevance.algorithm == "lexical_overlap_v1"
 
 
+def test_opt_in_ai_relevance_can_recover_a_lexical_miss_without_calling_live_provider(
+    client, monkeypatch
+):
+    from app.providers.contracts import ProviderUsage
+    from app.research.llm_tasks import CandidateRelevanceReviewV1
+
+    question = "Does primary care continuity lower avoidable hospital admissions for older adults?"
+    title = "Ambulatory relationships and preventable inpatient use among seniors"
+
+    class AlternateWordingCrossref:
+        def __init__(self):
+            pass
+
+        def search(self, query, *, limit=5):
+            return [
+                CrossrefRecord(
+                    external_id="record:alternate-terminology",
+                    title=title,
+                    doi=None,
+                    url="https://publisher.example/alternate-terminology",
+                    authors=[],
+                    published_year=2025,
+                    publisher="Example Health Journal",
+                    abstract_excerpt="PRIVATE ABSTRACT MUST NOT BE SENT",
+                    query=query,
+                )
+            ]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(workflow, "CrossrefProvider", AlternateWordingCrossref)
+    project = create_project(client)
+    job = create_job(
+        client,
+        project["id"],
+        idempotency_key="ai-candidate-relevance-workflow",
+        question=question,
+    )
+    review_calls = []
+
+    def allow_fixture_review(*_args, **_kwargs):
+        return None
+
+    def fixture_review(_db, _job_snapshot, *, user, **_kwargs):
+        payload = json.loads(user)
+        review_calls.append(payload)
+        assert "PRIVATE ABSTRACT MUST NOT BE SENT" not in user
+        assert "publisher.example" not in user
+        candidate_key = payload["candidates"][0]["candidate_key"]
+        return (
+            CandidateRelevanceReviewV1.model_validate(
+                {
+                    "schema_version": 1,
+                    "assessments": [
+                        {
+                            "candidate_key": candidate_key,
+                            "assessment": "directly_relevant",
+                            "reason": "The title uses alternative wording for the requested outcome.",
+                        }
+                    ],
+                }
+            ),
+            ProviderUsage(
+                provider="openrouter",
+                model="fixture-only",
+                input_tokens=1,
+                output_tokens=1,
+                reported_cost_usd=0.0,
+                estimated_cost_usd=0.0,
+                latency_ms=1,
+            ),
+        )
+
+    monkeypatch.setattr(workflow, "_model_call_blocker", allow_fixture_review)
+    monkeypatch.setattr(workflow, "_call_structured", fixture_review)
+
+    with client.db_sessions() as db:
+        persisted = db.get(ResearchJob, job["id"])
+        checkpoint = checkpoint_with_queries(persisted, ["medical utilization patterns"])
+        checkpoint["extensions"] = {"ai_assisted_relevance": True}
+        persisted.current_stage = "discovery"
+        persisted.checkpoint_json = checkpoint
+        result = workflow.execute_stage(db, workflow.job_snapshot(persisted))
+
+    assert len(review_calls) == 1, (
+        result.event_data["ai_relevance_status"],
+        result.event_data.get("ai_relevance_reason"),
+        result.event_data["ai_relevance_candidate_count"],
+        [
+            (
+                item.record.title,
+                item.record.source_type,
+                item.record.provider_metadata,
+                item.candidate_key,
+                item.relevance.topic_eligibility_basis if item.relevance else None,
+            )
+            for item in result.candidates or []
+        ],
+    )
+    assert review_calls[0]["candidates"][0]["title"] == title
+    assert result.event_data["ai_relevance_status"] == "completed"
+    assert result.event_data["ai_relevance_promoted_count"] == 1
+    assert result.sources[0].title == title
+    assert result.candidates[0].reason_code == "selected_by_ai_relevance"
+    assert result.candidates[0].relevance.topic_eligibility_basis == "not_eligible"
+    assert result.candidates[0].relevance.ai_assessment.provider == "openrouter"
+
+
 def test_source_cap_selects_later_candidate_with_higher_query_overlap(client, monkeypatch):
     class OrderedCrossref:
         def __init__(self):

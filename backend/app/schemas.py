@@ -218,6 +218,7 @@ class JobCreate(BaseModel):
     target_outcome: str | None = Field(default=None, max_length=300)
     denominator: str | None = Field(default=None, max_length=200)
     assumptions_to_test: str | None = Field(default=None, max_length=1000)
+    ai_assisted_relevance: bool = False
     depth: Literal["quick", "standard", "deep"] = "standard"
     model_provider: Literal["disabled", "openrouter", "openai", "sarvam"] | None = None
     model_name: str | None = Field(default=None, max_length=160)
@@ -534,6 +535,23 @@ class PlannedQueryAlignmentV1(BaseModel):
         return self
 
 
+class CandidateAIRelevanceV1(BaseModel):
+    """Optional model relevance judgment, kept separate from deterministic lexical features."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal[1] = 1
+    assessment: Literal[
+        "directly_relevant", "potentially_relevant", "background", "unrelated", "uncertain"
+    ]
+    reason: str = Field(min_length=1, max_length=240)
+    provider: Literal["openrouter", "openai", "sarvam"]
+    model: str = Field(min_length=1, max_length=200)
+    interpretation_limit: Literal[
+        "Model-assisted bibliographic relevance only; not source quality, study validity, evidence, or truth."
+    ] = "Model-assisted bibliographic relevance only; not source quality, study validity, evidence, or truth."
+
+
 class CandidateRelevanceV1(BaseModel):
     """Reproducible bibliographic overlap features; never an evidence-quality judgment."""
 
@@ -559,6 +577,7 @@ class CandidateRelevanceV1(BaseModel):
     topic_eligibility_basis: (
         Literal["original_question", "recorded_query_domain_expansion", "not_eligible"] | None
     ) = None
+    ai_assessment: CandidateAIRelevanceV1 | None = None
     interpretation_limit: Literal[
         "Retrieval relevance only; not source quality, study validity, claim support, or truth."
     ]
@@ -649,6 +668,7 @@ class CandidateOccurrenceV1(BaseModel):
         "repository_artifact_description_not_abstract",
         "insufficient_topic_overlap",
         "selected_by_relevance",
+        "selected_by_ai_relevance",
         "selected_by_discovery_order",
         "source_limit",
     ]
@@ -673,13 +693,30 @@ class CandidateOccurrenceV1(BaseModel):
         if is_statistics != (self.relevance is None):
             raise ValueError("only official-statistics candidates omit lexical relevance")
         if self.disposition == "selected":
-            expected = "selected_by_discovery_order" if is_statistics else "selected_by_relevance"
+            expected_reasons = (
+                {"selected_by_discovery_order"}
+                if is_statistics
+                else {"selected_by_relevance", "selected_by_ai_relevance"}
+            )
             if (
-                self.reason_code != expected
+                self.reason_code not in expected_reasons
                 or self.canonical_external_id != self.record.external_id
             ):
                 raise ValueError("selected candidate must identify its selected source record")
-        elif self.reason_code in {"selected_by_relevance", "selected_by_discovery_order"}:
+            if self.reason_code == "selected_by_ai_relevance" and not (
+                self.relevance
+                and self.relevance.ai_assessment
+                and self.relevance.ai_assessment.assessment == "directly_relevant"
+                and self.relevance.topic_eligibility_basis == "not_eligible"
+            ):
+                raise ValueError(
+                    "AI-selected candidate must document a direct recovery of a lexical miss"
+                )
+        elif self.reason_code in {
+            "selected_by_relevance",
+            "selected_by_ai_relevance",
+            "selected_by_discovery_order",
+        }:
             raise ValueError("excluded candidate cannot use a selected disposition reason")
         if self.canonical_external_id == self.record.external_id and self.reason_code in {
             "license_not_verified",
@@ -1946,6 +1983,7 @@ class JobOut(BaseModel):
     question: str
     scope: dict[str, Any]
     depth: str
+    ai_assisted_relevance: bool = False
     model_provider: str | None = None
     model_name: str | None = None
     budget_ceiling_usd: float
@@ -1982,7 +2020,11 @@ class EventOut(BaseModel):
 class CandidateRankingEventV1(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    algorithm: Literal["lexical_overlap_v1", "lexical_overlap_query_alignment_v1"]
+    algorithm: Literal[
+        "lexical_overlap_v1",
+        "lexical_overlap_query_alignment_v1",
+        "lexical_overlap_query_alignment_ai_relevance_v1",
+    ]
     ranking_query_basis: str = Field(min_length=1, max_length=160)
     features: list[str] = Field(max_length=8)
     weights: dict[str, float] = Field(max_length=8)
@@ -2051,6 +2093,21 @@ class JobEventDataV1(BaseModel):
     )
     candidate_occurrences_recorded: int | None = Field(default=None, ge=0, le=1000)
     candidate_ranking: CandidateRankingEventV1 | None = None
+    ai_relevance_status: (
+        Literal[
+            "not_requested",
+            "not_needed_no_candidates",
+            "completed",
+            "skipped_budget_or_provider",
+            "failed_invalid_output",
+            "failed_provider",
+            "uncertain_outcome",
+        ]
+        | None
+    ) = None
+    ai_relevance_reason: str | None = Field(default=None, max_length=300)
+    ai_relevance_candidate_count: int | None = Field(default=None, ge=0, le=12)
+    ai_relevance_promoted_count: int | None = Field(default=None, ge=0, le=12)
     elapsed_limit_reached: bool | None = None
     source_limit: int | None = Field(default=None, ge=0, le=1000)
     providers: list[str] | None = Field(default=None, max_length=32)

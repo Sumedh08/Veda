@@ -31,6 +31,7 @@ export type ResearchJob = {
     [key: string]: string | number | null | undefined | Record<string, unknown>;
   };
   depth: 'quick' | 'standard' | 'deep';
+  ai_assisted_relevance: boolean;
   model_provider?: string | null;
   model_name?: string | null;
   budget_ceiling_usd: number;
@@ -583,6 +584,14 @@ export type DiscoveryCandidate = {
     selection_basis?: 'user_question' | 'recorded_provider_query' | 'tie' | null;
     topic_eligibility_basis?: 'original_question' | 'recorded_query_domain_expansion' | 'not_eligible' | null;
     interpretation_limit: string;
+    ai_assessment?: {
+      schema_version: 1;
+      assessment: 'directly_relevant' | 'potentially_relevant' | 'background' | 'unrelated' | 'uncertain';
+      reason: string;
+      provider: 'openrouter' | 'openai' | 'sarvam';
+      model: string;
+      interpretation_limit: string;
+    } | null;
   } | null;
   planned_query_score?: number | null;
   selection_score?: number | null;

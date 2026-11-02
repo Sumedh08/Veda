@@ -15,7 +15,8 @@ from app.mcp_evidence_server import (
     create_evidence_mcp_server,
     validate_loopback_api_url,
 )
-from app.models import Passage, Project, ResearchJob, RetrievedDocument, Source
+from app.models import DiscoveryCandidate, Passage, Project, ResearchJob, RetrievedDocument, Source
+from app.research.candidate_relevance import score_candidate_relevance
 
 
 def _add_evidence(
@@ -304,6 +305,112 @@ def test_mcp_protocol_exposes_licensed_passage_and_withholds_private_research_te
     assert private_passage_result["passage"]["content"] is None
     assert unverified_passage_result["source"]["source_id"] == unverified_source_id
     assert unverified_passage_result["passage"]["content"] is None
+
+
+def test_mcp_candidate_ledger_is_bounded_owner_scoped_and_metadata_only(client):
+    project_id, job_id, candidate_id = str(uuid4()), str(uuid4()), str(uuid4())
+    with client.db_sessions() as db:
+        project = Project(
+            id=project_id,
+            owner_id=client.test_user["id"],
+            title="Candidate review project",
+            description="",
+            domain="health policy",
+        )
+        job = ResearchJob(
+            id=job_id,
+            project_id=project_id,
+            question="What evidence links primary care continuity to admissions?",
+            idempotency_key=str(uuid4()),
+            status="completed",
+            current_stage="complete",
+        )
+        candidate = DiscoveryCandidate(
+            id=candidate_id,
+            job_id=job_id,
+            candidate_key="a" * 64,
+            provider="Crossref",
+            provider_record_id="fixture:record-1",
+            canonical_identity="doi:10.5555/example.1",
+            title="Continuity of primary care and avoidable hospital admissions",
+            publisher="Example Health Journal",
+            abstract_excerpt="PRIVATE ABSTRACT MUST NOT BE DISCLOSED",
+            abstract_excerpt_retention_status="not_retained_rights_unclear",
+            doi="10.5555/example.1",
+            url="https://doi.org/10.5555/example.1",
+            published_year=2025,
+            query_text="primary care continuity admissions",
+            ranking_order=1,
+            relevance_score=0.0,
+            relevance_json={
+                **score_candidate_relevance(
+                    "primary care continuity and admissions",
+                    "Continuity of primary care and avoidable hospital admissions",
+                    None,
+                ),
+                "topic_eligibility_basis": "not_eligible",
+                "ai_assessment": {
+                    "schema_version": 1,
+                    "assessment": "directly_relevant",
+                    "reason": "Title is relevant to the question's stated relationship.",
+                    "provider": "openrouter",
+                    "model": "fixture-model",
+                    "interpretation_limit": "Model-assisted bibliographic relevance only; not source quality, study validity, evidence, or truth.",
+                },
+            },
+            disposition="excluded",
+            reason_code="insufficient_topic_overlap",
+            discovered_at=datetime.now(UTC),
+        )
+        db.add_all([project, job, candidate])
+        db.commit()
+
+    server = create_evidence_mcp_server(client)
+    from app.api.routes import _candidate_out
+
+    with client.db_sessions() as db:
+        direct_candidate = _candidate_out(db.get(DiscoveryCandidate, candidate_id))
+        assert direct_candidate["relevance"]["ai_assessment"]["assessment"] == "directly_relevant"
+    protocol_client = pytest.importorskip(
+        "mcp", reason="install the optional backend mcp extra"
+    ).Client
+
+    async def call_server():
+        async with protocol_client(server) as mcp_client:
+            listed = await mcp_client.list_tools()
+            assert "list_research_candidates" in {tool.name for tool in listed.tools}
+            result = await mcp_client.call_tool(
+                "list_research_candidates", {"job_id": job_id, "limit": 5}
+            )
+            return result
+
+    result = asyncio.run(call_server())
+    assert not result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload["candidates"][0]["title"] == candidate.title
+    assert payload["candidates"][0]["ai_relevance"]["assessment"] == "directly_relevant"
+    assert payload["candidates"][0]["external_disclosure"] == "metadata_only"
+    assert "PRIVATE ABSTRACT MUST NOT BE DISCLOSED" not in result.content[0].text
+    assert "abstract_excerpt" not in result.content[0].text
+
+
+@pytest.mark.parametrize(
+    ("candidate_url", "expected"),
+    [
+        ("https://publisher.example/research.pdf", "https://publisher.example/research.pdf"),
+        ("http://127.0.0.1/private", None),
+        ("https://metadata.internal/report", None),
+        ("javascript:alert(1)", None),
+        ("https://example.test:99999/report", None),
+        ("https://user:secret@example.test/report", None),
+        ("https://[invalid/report", None),
+        (f"https://example.test/{'a' * 800}", None),
+    ],
+)
+def test_mcp_candidate_url_projection_rejects_nonpublic_or_malformed_urls(candidate_url, expected):
+    from app.mcp_evidence_server import _safe_candidate_url
+
+    assert _safe_candidate_url(candidate_url) == expected
 
 
 def test_stdio_transport_works_with_official_mcp_client_protocol_only():

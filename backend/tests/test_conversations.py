@@ -91,6 +91,22 @@ def test_job_creation_starts_persistent_conversation_and_is_idempotent(client):
         len(client.get(f"/api/v1/conversations/{job['conversation_id']}/messages").json()["items"])
         == 1
     )
+    assert job["ai_assisted_relevance"] is False
+
+
+def test_ai_relevance_opt_in_is_persisted_per_job_and_default_remains_off(client):
+    project = _project(client)
+    job, _ = _create_job(
+        client,
+        project["id"],
+        idempotency_key="conversation-ai-relevance-0001",
+        ai_assisted_relevance=True,
+    )
+
+    assert job["ai_assisted_relevance"] is True
+    with client.db_sessions() as db:
+        persisted = db.get(ResearchJob, job["id"])
+        assert persisted.checkpoint_json["extensions"]["ai_assisted_relevance"] is True
 
 
 def test_follow_up_reuses_only_relevant_parent_claim_ids_with_provenance(client):

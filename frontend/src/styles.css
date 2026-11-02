@@ -292,3 +292,7 @@ a { color: inherit; }
 .model-plan-details li { line-height: 1.45; }
 .model-plan-details .deferred-operation { color: #e0bd84; }
 @media (max-width: 600px) { .model-plan-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ai-relevance-option { display: grid; gap: 5px; padding: 9px; border: 1px solid rgba(160,190,154,.18); border-radius: 6px; background: rgba(62,92,61,.06); }
+.modal-form .ai-relevance-option label { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: #bdc9bd; }
+.modal-form .ai-relevance-option input[type="checkbox"] { width: 14px; height: 14px; margin: 0; padding: 0; accent-color: #a4c2a0; }
+.ai-relevance-option p { margin: 0; color: #91a192; font-size: 8px; line-height: 1.5; }

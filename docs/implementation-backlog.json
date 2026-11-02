@@ -2197,5 +2197,20 @@
     "status": "DONE",
     "verification": "2026-11-02: Optional `mcp==2.3.0` extra adds no base runtime dependency. A read-only stdio server and owner-scoped POST evidence search API expose bounded search, source provenance, and passage lookup; external text requires explicit item-level CC-BY 4.0 or CC0 sharing evidence and complete passage/document hashes. In-memory official SDK client and stdio transport tests passed using a loopback-only fake API; tests confirm licensed passage locator/hash and withholding of private-only and unverified-license text. This is protocol-only fixture evidence; Claude, ChatGPT and other hosted clients were not connected. MCP does not improve acquisition or research quality and remote ChatGPT use would need a separately hosted/authenticated MCP endpoint. No durable MCP-specific audit table or database migration was added.",
     "next_action": "Keep MCP optional. Before client deployment or remote hosting, add a client-specific authentication review and durable audit requirements if needed; never expose private-research-only passages through this boundary. Continue standalone Veda research and use this server only to inspect evidence that satisfies the narrower sharing gate."
+  },
+  {
+    "id": "T-144",
+    "task": "Add optional bounded AI-assisted candidate relevance and expose the saved candidate ledger through MCP",
+    "depends_on": [
+      "T-141",
+      "T-143"
+    ],
+    "priority": "P1",
+    "owner": "Codex",
+    "effort": "M",
+    "acceptance": "An opt-in per-job, one-call structured relevance review evaluates a bounded, deduplicated set of metadata records including lexical misses; deterministic ranking remains auditable; only directly relevant assessments may recover the topic gate and cannot override source, identity, rights, access or acquisition controls. The existing read-only MCP interface returns bounded candidate metadata without abstracts or unverified passage text, and a client-neutral skill documents the actual tools.",
+    "status": "DONE",
+    "verification": "2026-11-03: Added bounded candidate review and workflow wiring, explicit UI opt-in defaulting off, typed provenance, metadata-only MCP candidate ledger, public-URL projection checks, and a client-neutral research Skill. Full backend 912 passed / 2 PostgreSQL-only skipped; Ruff check/format passed for 10 files; Vitest 23/23; production build; final fixture Playwright 54 passed / 19 gated skips; backlog/evaluation/benchmark/annotation/research-audit validators passed. No live model call, external MCP client, new provider, dependency, migration, or research-quality result was used.",
+    "next_action": "Evaluate semantic accuracy and selection effects only after collecting independently reviewed labels and receiving explicit authorization for provider calls. Keep deterministic ranking as fallback and do not infer that MCP improves acquisition."
   }
 ]

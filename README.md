@@ -2,6 +2,47 @@
 
 Veda is an evidence-tracking research workspace for questions about AI adoption, productivity, implementation and business decisions. This repository is the first implementation in progress. Its current maturity and verified behavior are tracked in [`docs/implementation-progress.md`](docs/implementation-progress.md) and [`evaluation/RESULTS.md`](evaluation/RESULTS.md).
 
+## Use Veda with Codex
+
+Veda provides two separate pieces: an installable research skill that teaches an assistant how to inspect saved Veda evidence, and an optional local MCP server that connects Codex to a running Veda API. The skill contains instructions; it does not install or start Veda. The MCP server exposes only evidence already available to the signed-in local Veda user. It does not start research jobs or retrieve new documents.
+
+### Install the research skill
+
+With Node.js 22.20 or newer, install the skill from this public GitHub repository using the community `skills` CLI:
+
+```powershell
+npx skills add Sumedh08/Veda --skill veda-evidence-research --agent codex --global
+```
+
+The command installs the skill for Codex across projects. Remove `--global` to install it in the current project instead. Start a new Codex session after installation. Review the [skill source](skills/veda-evidence-research/SKILL.md) before installing; Veda does not receive your Codex credentials through the skill installer. The `skills` CLI is maintained by Vercel, not by Veda.
+
+If Node.js is older than 22.20, the current `skills` CLI may not run. On Windows, you can instead copy the reviewed skill directly from this repository into Codex's default global skill folder:
+
+```powershell
+$vedaSkillDir = Join-Path $HOME ".codex\skills\veda-evidence-research"
+New-Item -ItemType Directory -Force -Path $vedaSkillDir | Out-Null
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Sumedh08/Veda/main/skills/veda-evidence-research/SKILL.md" -OutFile (Join-Path $vedaSkillDir "SKILL.md")
+```
+
+This uses Codex's default `~/.codex/skills` location. If you configured a custom Codex home directory, use its `skills` folder instead.
+
+### Connect Codex to your local Veda MCP server
+
+First configure and start Veda's API using [Local development](#local-development). Keep it running on `127.0.0.1:8000`. From the Veda repository root, install the optional MCP dependency and register the stdio server with Codex:
+
+```powershell
+uv --directory .\backend sync --locked --extra dev --extra mcp
+$vedaBackend = (Resolve-Path .\backend).Path
+codex mcp add veda -- uv --directory $vedaBackend run --locked --extra mcp python -m app.mcp_evidence_server
+codex mcp list
+```
+
+Restart Codex and start a new session. The app and MCP process both need to run on the same computer. In local development mode, the MCP process can create a short-lived local token when `APP_ENV=development` and `DEV_AUTH_ENABLED=true` are set in the repository `.env`; keep `DEV_AUTH_SECRET` local and never paste it into a shared configuration. For a managed-auth local API, provide `VEDA_MCP_BEARER_TOKEN` to the MCP process through a protected local environment or secret manager, not in a command or committed file.
+
+In Codex, ask it to use the `veda-evidence-research` skill and inspect your saved Veda evidence. You can check registration with `codex mcp list` and remove it with `codex mcp remove veda`. This tests local Codex configuration only; it does not connect the server to cloud-hosted ChatGPT. ChatGPT cloud access would need a separately hosted or securely tunneled MCP endpoint and an appropriate authentication setup.
+
+For other compatible clients, use their documented MCP configuration with the same local stdio command and install the skill into that client's skill directory. The skill and MCP connection are independent: installing one does not install the other. See the [Codex MCP documentation](https://developers.openai.com/learn/docs-mcp) and [`skills` CLI documentation](https://github.com/vercel-labs/skills#install-a-skill).
+
 ## Local development
 
 Requirements: Python 3.12 or newer, [uv](https://docs.astral.sh/uv/), Node.js 20 or newer, and npm. PostgreSQL is optional for local development; SQLite is used when `DATABASE_URL` is unset. Production mode fails closed unless an external PostgreSQL service, managed-auth verifier, HTTPS frontend origins and rate-limit hash secret are configured.
@@ -89,7 +130,7 @@ uv sync --locked --extra dev --extra mcp
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-In another terminal from `backend/`, start the MCP stdio process:
+Codex launches the MCP stdio process from the command registered above. To run the protocol manually during development, use another terminal from `backend/`:
 
 ```powershell
 uv run --locked --extra mcp python -m app.mcp_evidence_server

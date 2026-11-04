@@ -2229,5 +2229,20 @@
     "status": "DONE",
     "verification": "2026-11-03: Implemented typed source-local document analysis in the existing appraisal operation, passage-ID validation, synthesis navigation guard, source-diverse claim comparison, and bounded owner-scoped read-only MCP views with item-level sharing, exact passage-digest, and passage/document/source-binding checks. Full backend: 923 passed, 2 PostgreSQL-only skipped; frontend Vitest 23/23; production build; targeted report-citations Playwright 49 passed; SQLite migration round-trip/Alembic check; changed Ruff check/format; project validators passed. No provider/model request or external MCP client was used. This verifies implementation and fixtures, not live AI analysis or research quality.",
     "next_action": "For real model analysis, obtain fresh model-call authorization and evaluate independently labeled outputs; for external-client interoperability, connect a configured local client. Keep T-140/B-017 open for real nonacademic acquisition and B-010 open for independent scientific-quality evaluation."
+  },
+  {
+    "id": "T-146",
+    "task": "Make the Veda research skill and local MCP setup easy to install from GitHub",
+    "depends_on": [
+      "T-143",
+      "T-145"
+    ],
+    "priority": "P2",
+    "owner": "Codex",
+    "effort": "S",
+    "acceptance": "The public repository exposes the research skill in a conventional GitHub-installable skills directory and documents copyable Windows/Codex commands to install the skill and configure the existing local stdio MCP server. Documentation preserves the distinction between skill instructions, local evidence access, and cloud-hosted clients.",
+    "status": "DONE",
+    "verification": "2026-11-04: Moved the canonical skill to skills/veda-evidence-research/SKILL.md with a documentation pointer at the former path; added `npx skills add Sumedh08/Veda --skill veda-evidence-research --agent codex --global`, a Windows raw-file fallback for Node versions below the upstream CLI requirement, and a local `codex mcp add` command. Codex CLI 0.166.0-alpha.5.1 help confirmed stdio registration/removal syntax. Upstream skills CLI documentation supports the GitHub command format. Local Node.js is 22.16.0, below the documented 22.20 minimum, so installation was not executed. No Codex global configuration or external client was changed.",
+    "next_action": "User can install the skill and register the local MCP server using README instructions. For a client-level acceptance result, run Codex with the API active and inspect the available Veda tools; cloud ChatGPT remains unsupported without a remote or tunnel endpoint."
   }
 ]

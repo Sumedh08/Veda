@@ -6,6 +6,8 @@ Veda is an evidence-tracking research workspace for questions about AI adoption,
 
 Veda provides two separate pieces: an installable research skill that teaches an assistant how to inspect saved Veda evidence, and an optional local MCP server that connects Codex to a running Veda API. The skill contains instructions; it does not install or start Veda. The MCP server exposes only evidence already available to the signed-in local Veda user. It does not start research jobs or retrieve new documents.
 
+Without the Veda API running, the skill can still be read and installed, but its MCP tools cannot search or retrieve evidence and Codex cannot inspect your saved Veda corpus.
+
 ### Install the research skill
 
 With Node.js 22.20 or newer, install the skill from this public GitHub repository using the community `skills` CLI:
@@ -40,6 +42,16 @@ codex mcp list
 Restart Codex and start a new session. The app and MCP process both need to run on the same computer. In local development mode, the MCP process can create a short-lived local token when `APP_ENV=development` and `DEV_AUTH_ENABLED=true` are set in the repository `.env`; keep `DEV_AUTH_SECRET` local and never paste it into a shared configuration. For a managed-auth local API, provide `VEDA_MCP_BEARER_TOKEN` to the MCP process through a protected local environment or secret manager, not in a command or committed file.
 
 In Codex, ask it to use the `veda-evidence-research` skill and inspect your saved Veda evidence. You can check registration with `codex mcp list` and remove it with `codex mcp remove veda`. This tests local Codex configuration only; it does not connect the server to cloud-hosted ChatGPT. ChatGPT cloud access would need a separately hosted or securely tunneled MCP endpoint and an appropriate authentication setup.
+
+### Verify the connection
+
+Start a new Codex chat after installing the skill and registering the MCP server. Try this prompt, replacing the search phrase with wording you know appears in one of your saved Veda documents:
+
+```text
+Use the veda-evidence-research skill. Search my saved Veda evidence for “frequency response”. For any match, inspect its source provenance and retrieve one supporting passage only if Veda allows external text sharing. Report the source title, source ID, passage locator, and whether the passage text was available. Do not start a research job or fetch a document.
+```
+
+You should see Codex call `search_research_evidence`, then use provenance or passage tools for a result. An empty result means the connection worked but that phrase was not found in the saved corpus. Veda returns passage text only when item-level CC BY or CC0 sharing evidence and document/passage hashes pass its checks; otherwise it returns metadata and locators without the text. Installing the skill does not connect or start Veda, and registering MCP does not populate a research corpus.
 
 For other compatible clients, use their documented MCP configuration with the same local stdio command and install the skill into that client's skill directory. The skill and MCP connection are independent: installing one does not install the other. See the [Codex MCP documentation](https://developers.openai.com/learn/docs-mcp) and [`skills` CLI documentation](https://github.com/vercel-labs/skills#install-a-skill).
 
